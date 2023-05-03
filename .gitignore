@@ -1,0 +1,8 @@
+checkpoint*
+*.fits
+*.hdf
+*.npy
+*.tbl
+*.png
+*.pdf
+data/notebooks/HSC footprint/*
