@@ -10,8 +10,10 @@ import os
 import re
 import shutil
 
+# Don't forget to remove any corrupted/bad images from the cutouts_path directory before running this!
+
 script_dir = os.path.dirname(__file__) # Want paths relative to the script, not relative to current working directory
-cutouts_path = os.path.join(script_dir, '../../cutouts_mask_var/*.fits')#"../raw/cutouts/*.fits") # Where the individual downloaded cutouts are located
+cutouts_path = os.path.join(script_dir, '../../cutouts_550kpc/*.fits')#"../raw/cutouts/*.fits") # Where the individual downloaded cutouts are located
 output_path = os.path.join(script_dir, '../../') #"../processed/") # Where to put the final HDF5 file
 
 # Functions to enable sorting in "natural order" (i.e. same order as is in the catalogue). Code from https://stackoverflow.com/questions/5967500/how-to-correctly-sort-a-string-with-a-number-inside
@@ -36,7 +38,7 @@ for i,name in enumerate(fnames):
     export_hdf(f, f"{tmp_dir_path}/{i}.hdf")
 
 # Aggregate all files 
-with h5py.File(output_path+"cutouts.hdf", mode='w') as d:
+with h5py.File(output_path+"cutouts_550.hdf", mode='w') as d:
     for i in range(len(fnames)):
         with h5py.File(f"{tmp_dir_path}/{i}.hdf", mode='r+') as s:
             d.copy(s, f"{i}")

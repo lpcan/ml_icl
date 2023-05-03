@@ -36,6 +36,7 @@ zs = tbl['z_cl']
 ras = tbl['RA [deg]'][zs <= 0.5]
 decs = tbl['Dec [deg]'][zs <= 0.5]
 names = tbl['Name'][zs <= 0.5]
+zs = zs[zs <= 0.5]
 
 coords = SkyCoord(ras, decs, unit=u.deg)
 print(f"{len(coords)} clusters to download")
@@ -71,13 +72,19 @@ pdr2 = hsc.Hsc(dr='pdr2', rerun=rerun)
 f = open(output_dir+"failed_downloads.txt", "a+")
 f.write(f"Clusters from {cat_path}\n")
 
+cosmo = FlatLambdaCDM(H0=68.4, Om0=0.301)
+
 for i,c in enumerate(coords):
     print(f"Downloading cluster {i}")
+
+    ################ REMOVE THIS LATER #####################
+    half_size = cosmo.arcsec_per_kpc_proper(zs[i]) * 550 * u.kpc
+    ########################################################
 
     try:
         hsc_cutout(c, cutout_size=half_size, filters='r', archive=pdr2, 
                    use_saved=False, output_dir=output_dir, verbose=False, 
-                   save_output=True, variance=True, mask=True)
+                   save_output=True, variance=False, mask=True)
     except Exception as e:
         print(f"{e} for cluster {i}")
         f.write(f"Cluster {i} ({names[i]})\n")
