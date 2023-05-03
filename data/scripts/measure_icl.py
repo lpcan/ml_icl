@@ -11,6 +11,7 @@ import multiprocessing as mp
 from multiprocessing.shared_memory import SharedMemory
 import numpy as np
 import os
+from photutils.aperture import CircularAnnulus
 from photutils.background import Background2D
 from scipy.interpolate import CloughTocher2DInterpolator
 import sys
@@ -35,10 +36,10 @@ def background_estimate(cutout, mask=None):
     box_size = 50
     box_cen = (box_size - 1) / 2.0
 
-    top = np.column_stack((xvals, (size_x - 1) * np.ones(size_x, dtype=int)))
+    top = np.column_stack((xvals, (size_y - 1) * np.ones(size_x, dtype=int)))
     bottom = np.column_stack((xvals, np.zeros(size_x, dtype=int)))
     left = np.column_stack((np.zeros(size_y, dtype=int), yvals))
-    right = np.column_stack(((size_y - 1) * np.ones(size_y, dtype=int), yvals))
+    right = np.column_stack(((size_x - 1) * np.ones(size_y, dtype=int), yvals))
 
     # Indices of edges
     square = np.unique(np.concatenate((top, bottom, left, right), axis=0), axis=0)
@@ -98,7 +99,7 @@ def calc_icl_frac(args):
     """
     keys, length, zs = args
     base_path = os.path.dirname(__file__)
-    cutouts = h5py.File(base_path + '/../../cutouts.hdf') #'/../processed/cutouts.hdf')
+    cutouts = h5py.File(base_path + '/../../cutouts_550.hdf') #'/../processed/cutouts.hdf')
 
     # Find the shared memory and create a numpy array interface
     shmem = SharedMemory(name=f'iclbuf', create=False)
@@ -130,16 +131,44 @@ def calc_icl_frac(args):
             fracs[key] = np.nan
             continue
 
+        # First background estimate
         bkg = background_estimate(cutout, mask=bad_mask)
-        
         bkg_subtracted = cutout - bkg
 
-        # Mask the image
-        masked_img = bkg_subtracted * circ_mask
+        # Secondary background estimate via radial profile
+        fluxes = []
+        px_threshold = (cosmo.arcsec_per_kpc_proper(zs[key]) * 350).value * 1/0.168 # Measure >350kpc away from BCG
+        centre = (bkg_subtracted.shape[0] // 2, bkg_subtracted.shape[1] // 2)
+        r_in = px_threshold
+        r_out = px_threshold + 20
+
+        while r_out < np.min(centre):
+            # Create the circular aperture
+            aperture = CircularAnnulus(centre, r_in=r_in, r_out=r_out)
+            mask = aperture.to_mask()
+
+            # Get the image and mask data inside this annulus
+            annulus = mask.cutout(bkg_subtracted, fill_value=np.nan)
+            mask_cutout = mask.cutout(bad_mask, fill_value=False)
+
+            # Calculate the sigma clipped average of values in the annulus
+            mean, _, _ = sigma_clipped_stats(annulus, mask=mask_cutout)
+            fluxes.append(mean)
+
+            # Update the radii
+            r_in += 20
+            r_out += 20
+
+        sky_value = np.nanmedian(fluxes)
+
+        bkg_subtracted = bkg_subtracted - sky_value
 
         # Calculate surface brightness limit (from Cristina's code (Roman+20))
         _, _, stddev = sigma_clipped_stats(bkg_subtracted, mask=bad_mask)
         sb_lim = -2.5 * np.log10(3*stddev/(0.168 * 120)) + 2.5 * np.log10(63095734448.0194)
+
+        # Mask the image
+        masked_img = bkg_subtracted * circ_mask
 
         # Convert image from counts to surface brightness, accounting for dimming
         np.seterr(invalid='ignore', divide='ignore')
@@ -213,7 +242,7 @@ if __name__ == '__main__':
     base_path = os.path.dirname(__file__)
 
     # Load the cutouts and the corresponding redshifts
-    cutouts = h5py.File(base_path + '/../../cutouts_dud.hdf') #'/../processed/cutouts.hdf')
+    cutouts = h5py.File(base_path + '/../../cutouts_550.hdf') #'/../processed/cutouts.hdf')
     tbl = ascii.read(base_path + '/../../dud_only.tbl', #'/../processed/camira_final.tbl', 
                     names=['ID', 'Name', 'RA', 'Dec', 'z', 'Richness', 'BCG z'])
     zs = tbl['z']
