@@ -51,8 +51,8 @@ def background_estimate(cutout, mask=None):
 
     # Interpolate between the edges of the square
     interp = CloughTocher2DInterpolator(real_square, vals)
-    x = np.arange(np.min(real_square), np.max(real_square))
-    y = np.arange(np.min(real_square), np.max(real_square))
+    x = np.arange(np.min(real_square[:,0]), np.max(real_square[:,0]))
+    y = np.arange(np.min(real_square[:,1]), np.max(real_square[:,1]))
     x, y = np.meshgrid(x, y) # 2D grid
     z = interp(x, y).T
 
@@ -75,7 +75,7 @@ def create_circular_mask(z, img, cosmo):
     """
     # Calculate the radius in pixels
     arcsec_to_px = 1/0.168
-    radius = (cosmo.arcsec_per_kpc_proper(z) * 130).value * arcsec_to_px
+    radius = (cosmo.arcsec_per_kpc_proper(z) * 200).value * arcsec_to_px
     
     # Generate the mask
     centre = (img.shape[1] // 2, img.shape[0] // 2)
@@ -135,33 +135,33 @@ def calc_icl_frac(args):
         bkg = background_estimate(cutout, mask=bad_mask)
         bkg_subtracted = cutout - bkg
 
-        # Secondary background estimate via radial profile
-        fluxes = []
-        px_threshold = (cosmo.arcsec_per_kpc_proper(zs[key]) * 350).value * 1/0.168 # Measure >350kpc away from BCG
-        centre = (bkg_subtracted.shape[0] // 2, bkg_subtracted.shape[1] // 2)
-        r_in = px_threshold
-        r_out = px_threshold + 20
+        # # Secondary background estimate via radial profile
+        # fluxes = []
+        # px_threshold = (cosmo.arcsec_per_kpc_proper(zs[key]) * 350).value * 1/0.168 # Measure >350kpc away from BCG
+        # centre = (bkg_subtracted.shape[0] // 2, bkg_subtracted.shape[1] // 2)
+        # r_in = px_threshold
+        # r_out = px_threshold + 20
 
-        while r_out < np.min(centre):
-            # Create the circular aperture
-            aperture = CircularAnnulus(centre, r_in=r_in, r_out=r_out)
-            mask = aperture.to_mask()
+        # while r_out < np.min(centre):
+        #     # Create the circular aperture
+        #     aperture = CircularAnnulus(centre, r_in=r_in, r_out=r_out)
+        #     mask = aperture.to_mask()
 
-            # Get the image and mask data inside this annulus
-            annulus = mask.cutout(bkg_subtracted, fill_value=np.nan)
-            mask_cutout = mask.cutout(bad_mask, fill_value=False)
+        #     # Get the image and mask data inside this annulus
+        #     annulus = mask.cutout(bkg_subtracted, fill_value=np.nan)
+        #     mask_cutout = mask.cutout(bad_mask, fill_value=False)
 
-            # Calculate the sigma clipped average of values in the annulus
-            mean, _, _ = sigma_clipped_stats(annulus, mask=mask_cutout)
-            fluxes.append(mean)
+        #     # Calculate the sigma clipped average of values in the annulus
+        #     mean, _, _ = sigma_clipped_stats(annulus, mask=mask_cutout)
+        #     fluxes.append(mean)
 
-            # Update the radii
-            r_in += 20
-            r_out += 20
+        #     # Update the radii
+        #     r_in += 20
+        #     r_out += 20
 
-        sky_value = np.nanmedian(fluxes)
+        # sky_value = np.nanmedian(fluxes)
 
-        bkg_subtracted = bkg_subtracted - sky_value
+        # bkg_subtracted = bkg_subtracted - sky_value
 
         # Calculate surface brightness limit (from Cristina's code (Roman+20))
         _, _, stddev = sigma_clipped_stats(bkg_subtracted, mask=bad_mask)
@@ -172,13 +172,14 @@ def calc_icl_frac(args):
 
         # Convert image from counts to surface brightness, accounting for dimming
         np.seterr(invalid='ignore', divide='ignore')
-        sb_img = counts2sb(masked_img, zs[key])
+        sb_img = counts2sb(masked_img, 0)
 
         # Mask out the values below surface brightness limit
         sb_img[sb_img >= sb_lim] = np.nan
 
         # Mask above the surface brightness threshold
-        mask = sb_img > 25
+        threshold = 25 + 10 * np.log10(1 + zs[int(key)])
+        mask = sb_img > threshold
 
         # Convert the SB image back to counts
         counts_img = sb2counts(sb_img)
