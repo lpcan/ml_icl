@@ -17,37 +17,33 @@ from scipy.interpolate import CloughTocher2DInterpolator
 import sys
 import tqdm
 
-def background_estimate(cutout, mask=None):
+def background_estimate(cutout, cosmo, mask=None):
     """
     Returns an estimate of the 2D background of `cutout`. The background is 
     measured in boxes of size 50px around the edges of the image, and the
     background is interpolated over the entire image. 
     """
     # Run photutil's Background2D for the low resolution grid
-    bkg_initial = Background2D(cutout, box_size=50, mask=mask)
+    box_size = cutout.shape[0] // 14
+    bkg_initial = Background2D(cutout, box_size=box_size, mask=mask)
     mesh = bkg_initial.background_mesh
     
     # Extract just the edges of the mesh
-    size_x = mesh.shape[0]
-    size_y = mesh.shape[1]
-    xvals = np.arange(0, size_x)
-    yvals = np.arange(0, size_y)
+    Y, X = np.ogrid[:mesh.shape[0], :mesh.shape[1]]
+    y_cen, x_cen = (mesh.shape[0] // 2, mesh.shape[1] // 2) 
 
-    box_size = 50
     box_cen = (box_size - 1) / 2.0
 
-    top = np.column_stack((xvals, (size_y - 1) * np.ones(size_x, dtype=int)))
-    bottom = np.column_stack((xvals, np.zeros(size_x, dtype=int)))
-    left = np.column_stack((np.zeros(size_y, dtype=int), yvals))
-    right = np.column_stack(((size_x - 1) * np.ones(size_y, dtype=int), yvals))
+    # Create a mask to cover the internal 250 kpc
+    px_dist = cosmo.arcsec_per_kpc_proper(0.2565) * 250 * 1/0.168
+    size = int(np.ceil(px_dist.value / box_size))
+    box = (X > x_cen - size) & (X < x_cen + size) & (Y > y_cen - size) & (Y < y_cen + size)
 
-    # Indices of edges
-    square = np.unique(np.concatenate((top, bottom, left, right), axis=0), axis=0)
-    # Pixel locations of centres of edge boxes
-    real_square = box_size * square + box_cen
+    # Get values from the mesh corresponding to these coordinates
+    vals = mesh[~box]
 
-    # Get the values from the mesh corresponding to the coordinates
-    vals = np.array([mesh[tuple(c)] for c in square])
+    # Array of coordinates in image units
+    real_square = np.argwhere(~box) * box_size + box_cen
 
     # Interpolate between the edges of the square
     interp = CloughTocher2DInterpolator(real_square, vals)
@@ -132,7 +128,7 @@ def calc_icl_frac(args):
             continue
 
         # First background estimate
-        bkg = background_estimate(cutout, mask=bad_mask)
+        bkg = background_estimate(cutout, cosmo, mask=bad_mask)
         bkg_subtracted = cutout - bkg
 
         # # Secondary background estimate via radial profile
@@ -170,7 +166,7 @@ def calc_icl_frac(args):
         # Mask the image
         masked_img = bkg_subtracted * circ_mask
 
-        # Convert image from counts to surface brightness, accounting for dimming
+        # Convert image from counts to surface brightness
         np.seterr(invalid='ignore', divide='ignore')
         sb_img = counts2sb(masked_img, 0)
 
