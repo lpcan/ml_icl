@@ -17,7 +17,7 @@ from scipy.interpolate import CloughTocher2DInterpolator
 import sys
 import tqdm
 
-def background_estimate(cutout, cosmo, mask=None):
+def background_estimate(cutout, z, cosmo, mask=None):
     """
     Returns an estimate of the 2D background of `cutout`. The background is 
     measured in boxes of size 50px around the edges of the image, and the
@@ -34,8 +34,8 @@ def background_estimate(cutout, cosmo, mask=None):
 
     box_cen = (box_size - 1) / 2.0
 
-    # Create a mask to cover the internal 250 kpc
-    px_dist = cosmo.arcsec_per_kpc_proper(0.2565) * 250 * 1/0.168
+    # Create a mask to cover the internal 350 kpc
+    px_dist = cosmo.arcsec_per_kpc_proper(z) * 350 * 1/0.168
     size = int(np.ceil(px_dist.value / box_size))
     box = (X > x_cen - size) & (X < x_cen + size) & (Y > y_cen - size) & (Y < y_cen + size)
 
@@ -127,41 +127,13 @@ def calc_icl_frac(args):
             fracs[key] = np.nan
             continue
 
-        # First background estimate
-        bkg = background_estimate(cutout, cosmo, mask=bad_mask)
+        # Background estimate
+        bkg = background_estimate(cutout, zs[key], cosmo, mask=bad_mask)
         bkg_subtracted = cutout - bkg
-
-        # # Secondary background estimate via radial profile
-        # fluxes = []
-        # px_threshold = (cosmo.arcsec_per_kpc_proper(zs[key]) * 350).value * 1/0.168 # Measure >350kpc away from BCG
-        # centre = (bkg_subtracted.shape[0] // 2, bkg_subtracted.shape[1] // 2)
-        # r_in = px_threshold
-        # r_out = px_threshold + 20
-
-        # while r_out < np.min(centre):
-        #     # Create the circular aperture
-        #     aperture = CircularAnnulus(centre, r_in=r_in, r_out=r_out)
-        #     mask = aperture.to_mask()
-
-        #     # Get the image and mask data inside this annulus
-        #     annulus = mask.cutout(bkg_subtracted, fill_value=np.nan)
-        #     mask_cutout = mask.cutout(bad_mask, fill_value=False)
-
-        #     # Calculate the sigma clipped average of values in the annulus
-        #     mean, _, _ = sigma_clipped_stats(annulus, mask=mask_cutout)
-        #     fluxes.append(mean)
-
-        #     # Update the radii
-        #     r_in += 20
-        #     r_out += 20
-
-        # sky_value = np.nanmedian(fluxes)
-
-        # bkg_subtracted = bkg_subtracted - sky_value
 
         # Calculate surface brightness limit (from Cristina's code (Roman+20))
         _, _, stddev = sigma_clipped_stats(bkg_subtracted, mask=bad_mask)
-        sb_lim = -2.5 * np.log10(3*stddev/(0.168 * 120)) + 2.5 * np.log10(63095734448.0194)
+        sb_lim = -2.5 * np.log10(3*stddev/(0.168 * 10)) + 2.5 * np.log10(63095734448.0194)
 
         # Mask the image
         masked_img = bkg_subtracted * circ_mask
@@ -180,10 +152,9 @@ def calc_icl_frac(args):
         # Convert the SB image back to counts
         counts_img = sb2counts(sb_img)
 
-        # Weight image using the inverse variance
         weighted_img = counts_img * ~bad_mask
 
-        fracs[key] = np.sum((weighted_img * mask)[~np.isnan(counts_img)]) / np.sum((weighted_img)[~np.isnan(counts_img)])
+        fracs[key] = np.nansum(weighted_img * mask) / np.nansum(weighted_img)
 
     return
 

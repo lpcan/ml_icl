@@ -88,11 +88,8 @@ pc = PatchCollection(rects, color='none')
 # Create figure and plot patches
 fig = plt.figure(figsize=(8,8), dpi=100)
 ax = fig.add_subplot(111)
-colours = [np.random.uniform(size=(3)) for _ in range(len(rects))]
 ax.imshow(output_arr, origin='lower')
 ax.add_collection(pc)
-
-arr = np.random.rand(len(images), 10, 10)
 
 # Create the annotations box
 im = OffsetImage(images[0], zoom=0.7, origin='lower')
