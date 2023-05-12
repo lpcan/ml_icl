@@ -5,4 +5,5 @@ checkpoint*
 *.tbl
 *.png
 *.pdf
+*.dat
 data/notebooks/HSC footprint/*
