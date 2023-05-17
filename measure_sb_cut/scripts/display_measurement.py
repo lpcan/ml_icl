@@ -13,11 +13,11 @@ def stretch(cutout):
 
 # Parameters
 script_dir = os.path.dirname(__file__)
-cutouts_path = os.path.join(script_dir, '../../cutouts_550.hdf')
+cutouts_path = os.path.join(script_dir, '../cutouts_550.hdf')
 fracs_path = os.path.join(script_dir, '../../fracs.npy')
 
 cosmo = FlatLambdaCDM(H0=68.4, Om0=0.301)
-zs = ascii.read(os.path.join(script_dir, '../processed/camira_final.tbl'))['z_cl']
+zs = ascii.read(os.path.join(script_dir, '../../data/processed/camira_final.tbl'))['z_cl']
 
 # Load the fractions and the cutouts
 fracs = np.load(fracs_path)[2]

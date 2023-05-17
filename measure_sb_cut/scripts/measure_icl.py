@@ -11,15 +11,18 @@ import multiprocessing as mp
 from multiprocessing.shared_memory import SharedMemory
 import numpy as np
 import os
-from photutils.aperture import CircularAnnulus
 from photutils.background import Background2D
 from scipy.interpolate import CloughTocher2DInterpolator
 import sys
 import tqdm
+import warnings
+from astropy.utils.exceptions import AstropyWarning
 
-from skimage.morphology import binary_opening
-import cv2
+warnings.simplefilter('ignore', category=AstropyWarning)
+
+from astropy.convolution import Gaussian2DKernel, convolve
 from astropy.table import join
+from photutils.segmentation import detect_threshold, detect_sources
 
 def background_estimate(cutout, z, cosmo, mask=None):
     """
@@ -86,20 +89,10 @@ def create_circular_mask(z, img, cosmo):
 
     return mask
 
-def segment(thresholded_img):
-    # Erode and dilate the mask to get rid of the specks
-    obj_mask_open = binary_opening(thresholded_img, np.ones((5,5)))
-    binary_img = np.array(obj_mask_open, dtype=np.uint8)
-
-    # Segment the image using connected components method
-    _, labels = cv2.connectedComponents(binary_img, connectivity=8)
-    return labels
-
 def get_member_locs(idx, merged, cutout_shape):
     # Get cluster location
     cluster_ra = merged[merged['ID'] == idx]['RA_cl'][0]
     cluster_dec = merged[merged['ID'] == idx]['Dec_cl'][0]
-    centre_px = (cutout_shape[0] // 2, cutout_shape[1] // 2)
 
     # Get the cluster members
     c_members = merged[merged['ID'] == idx]
@@ -127,6 +120,40 @@ def counts2sb(counts, z):
 def sb2counts(sb): # without reaccounting for dimming
     return 10**(-0.4*(sb - 2.5*np.log10(63095734448.0194) - 5.*np.log10(0.168)))
 
+def create_cold_labels(cutout, bad_mask, background):
+    # First apply the bright star mask
+    mask_input = np.array(cutout)
+    mask_input[bad_mask] = np.nan
+
+    # Smooth the image to help detect extended bright sources
+    kernel = Gaussian2DKernel(5)
+    kernel.normalize()
+    convolved = convolve(mask_input, kernel)
+    
+    # Detect threshold
+    threshold = detect_threshold(mask_input, nsigma=1.1, background=background, mask=bad_mask)
+
+    # Detect sources
+    segm = detect_sources(convolved, threshold=threshold, npixels=40)
+
+    return segm.data
+
+def create_hot_labels(unsharp, bad_mask, background):
+    # Detect threshold
+    threshold = detect_threshold(unsharp, nsigma=1.2, background=background, mask=bad_mask)
+    
+    # Detect sources
+    segm = detect_sources(unsharp, threshold, npixels=7, mask=bad_mask)
+
+    return segm.data
+
+def enlarge_mask(labels, sigma=1):
+    # Make the mask larger by convolving
+    kernel = Gaussian2DKernel(sigma)
+    mask = convolve(labels, kernel).astype(bool)
+
+    return mask
+
 def calc_icl_frac(args):
     """
     Calculate the ratio of light below the threshold to the total light in the 
@@ -146,6 +173,8 @@ def calc_icl_frac(args):
 
     # Go through the assigned clusters and calculate the icl fraction
     for key in keys:
+        if key == 4:
+            continue # bad image
         # Get the image data
         cutout = np.array(cutouts[str(key)]['HDU0']['DATA'])
 
@@ -175,14 +204,37 @@ def calc_icl_frac(args):
         np.seterr(invalid='ignore', divide='ignore')
         sb_img = counts2sb(bkg_subtracted, 0)
 
-        # Flag the non member galaxies
-        seg_threshold = 26 + 10 * np.log10(1 + zs[int(key)])
-        mask = sb_img > seg_threshold
-        obj_mask = ~(mask + bad_mask + np.isnan(sb_img))
-        labels = segment(obj_mask)
+        # Segment the image
+        cold_labels = create_cold_labels(cutout, bad_mask, bkg)
+
+        # Create the cold mask from the labels
+        cold_mask = enlarge_mask(cold_labels, sigma=2)
+
+        # Unsharp mask the image for hot mask creation
+        kernel = Gaussian2DKernel(5)
+        conv_img = convolve(np.array(cutout), kernel)
+        unsharp = np.array(cutout) - conv_img
+
+        # Check again for exclusion
+        inner_frac_masked = np.sum(bad_mask * cold_mask * circ_mask) / np.sum(circ_mask)
+        if inner_frac_masked > 0.2:
+            # >20% of inner region masked or middle pixel is masked
+            fracs[:,key] = np.nan
+            continue
+
+        # Create the hot mask
+        hot_mask_bkg = background_estimate(unsharp, z=zs[key], cosmo=cosmo, mask=(bad_mask))
+        hot_labels = create_hot_labels(unsharp, (bad_mask + cold_mask), background=hot_mask_bkg)
+        hot_mask = enlarge_mask(hot_labels, sigma=1)
+
+        # Mark the cluster members in the cold mask
         x_locs, y_locs = get_member_locs(int(key), merged, cutout.shape)
-        c_members = labels[y_locs.astype(int), x_locs.astype(int)]
-        member_mask = np.isin(labels, c_members) | (labels == 0) # also make sure to get the background in
+        c_members = cold_labels[y_locs.astype(int), x_locs.astype(int)]
+        member_mask = np.isin(cold_labels, c_members) | (cold_labels == 0)
+        non_member_mask = ~member_mask
+        non_member_mask = enlarge_mask(non_member_mask, sigma=2)
+        non_member_mask = non_member_mask + hot_mask
+        member_mask = ~non_member_mask
 
         # Calculate surface brightness limit (from Cristina's code (Roman+20))
         _, _, stddev = sigma_clipped_stats(bkg_subtracted, mask=bad_mask)
