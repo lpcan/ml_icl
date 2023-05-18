@@ -71,21 +71,21 @@ def background_estimate(cutout, z, cosmo, mask=None):
     # Return background estimation
     return bkg
 
-def create_circular_mask(z, img, cosmo):
+def create_circular_mask(z, img, cosmo, radius):
     """
     Returns a circular mask of 130kpc radius for given `z` and given cosmology
     `cosmo` for image `img`.
     """
     # Calculate the radius in pixels
     arcsec_to_px = 1/0.168
-    radius = (cosmo.arcsec_per_kpc_proper(z) * 200).value * arcsec_to_px
+    radius_px = (cosmo.arcsec_per_kpc_proper(z) * radius).value * arcsec_to_px
     
     # Generate the mask
     centre = (img.shape[1] // 2, img.shape[0] // 2)
     Y, X = np.ogrid[:img.shape[0], :img.shape[1]]
     dist_from_centre = np.sqrt((X-centre[0])**2 + (Y-centre[1])**2)
 
-    mask = dist_from_centre <= radius
+    mask = dist_from_centre <= radius_px
 
     return mask
 
@@ -159,7 +159,7 @@ def calc_icl_frac(args):
     Calculate the ratio of light below the threshold to the total light in the 
     image to get a rough estimate of the icl fraction.
     """
-    keys, length, zs, merged = args
+    keys, length, zs, richness, merged = args
 
     base_path = os.path.dirname(__file__)
     cutouts = h5py.File(base_path + '/../cutouts_550.hdf') #'/../processed/cutouts.hdf')
@@ -174,6 +174,7 @@ def calc_icl_frac(args):
     # Go through the assigned clusters and calculate the icl fraction
     for key in keys:
         if key == 4:
+            fracs[:,key] = np.nan
             continue # bad image
         # Get the image data
         cutout = np.array(cutouts[str(key)]['HDU0']['DATA'])
@@ -185,7 +186,8 @@ def calc_icl_frac(args):
         bad_mask = np.array(mask_data & (BAD | BRIGHT_OBJECT)).astype(bool)
 
         # Create the circular mask
-        circ_mask = create_circular_mask(zs[key], cutout, cosmo)
+        radius = np.min((richness[key] * 17 - 125, 350))
+        circ_mask = create_circular_mask(zs[key], cutout, cosmo, radius)
 
         # Check if this cutout should be excluded because too much is masked
         inner_frac_masked = np.sum(bad_mask * circ_mask) / np.sum(circ_mask)
@@ -258,7 +260,7 @@ def calc_icl_frac(args):
 
     return
 
-def calc_icl_frac_parallel(cutouts, zs, members):
+def calc_icl_frac_parallel(cutouts, zs, richness, merged):
     """
     Use multiprocessing to divide the cutouts among available cores and 
     calculate the ICL fractions.
@@ -269,7 +271,7 @@ def calc_icl_frac_parallel(cutouts, zs, members):
     # Divide the keys up into 20 
     jobs = np.array_split(np.arange(len(cutouts.keys())), 20)
     length = len(cutouts.keys()) * 3
-    args = [(j, length, zs, merged) for j in jobs]
+    args = [(j, length, zs, richness, merged) for j in jobs]
 
     exit = False
     try:
@@ -314,6 +316,7 @@ if __name__ == '__main__':
     tbl = ascii.read(base_path + '/../../data/processed/camira_final.tbl', #'/../processed/camira_final.tbl', 
                     names=['ID', 'Name', 'RA [deg]', 'Dec [deg]', 'z', 'Richness', 'BCG z'])
     zs = tbl['z']
+    richness = tbl['Richness']
     
     # Load the cluster member catalogue
     members = ascii.read(base_path + '/../../data/raw/camira_s20a_dud_member.dat', 
@@ -323,7 +326,7 @@ if __name__ == '__main__':
     merged = join(members, tbl, keys_left=['RA_cl', 'Dec_cl'], keys_right=['RA [deg]', 'Dec [deg]'])
     merged = merged['ID', 'Name', 'RA_cl', 'Dec_cl', 'z_cl', 'RA', 'Dec']
 
-    fracs = calc_icl_frac_parallel(cutouts, zs, merged)
+    fracs = calc_icl_frac_parallel(cutouts, zs, richness, merged)
 
     ranked = np.argsort(fracs[2])
     mask = ~np.isnan(fracs[2][ranked]) # Don't include nans in the top 5

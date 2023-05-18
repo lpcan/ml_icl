@@ -15,8 +15,8 @@ stddev = 0.017359
 class CircleDrawer:
     def __init__(self, ax):
         self.ax = ax
-        self.cutouts = h5py.File('../processed/cutouts.hdf')
-        self.table = ascii.read('../processed/camira_final.tbl',  
+        self.cutouts = h5py.File('../cutouts_550.hdf')
+        self.table = ascii.read('../../data/processed/camira_final.tbl',  
                                 names = ["ID", 
                                          "Name", 
                                          "RA [deg]", 
@@ -25,7 +25,7 @@ class CircleDrawer:
                                          "Richness", 
                                          "BCG redshift"]
                     )
-        self.possible_ids = [str(x) for x in range(len(self.table))]
+        self.possible_ids = [str(x) for x in range(len(self.table[:125]))]
         self.result = {}
         self.curr_id = random.choice(self.possible_ids)
         self.possible_ids.pop(int(self.curr_id))
