@@ -15,6 +15,7 @@ def stretch(cutout):
 script_dir = os.path.dirname(__file__)
 cutouts_path = os.path.join(script_dir, '../cutouts_550.hdf')
 fracs_path = os.path.join(script_dir, '../../fracs.npy')
+masks_path = os.path.join(script_dir, '../../masks.npy')
 
 cosmo = FlatLambdaCDM(H0=68.4, Om0=0.301)
 zs = ascii.read(os.path.join(script_dir, '../../data/processed/camira_final.tbl'))['z_cl']
@@ -22,6 +23,7 @@ zs = ascii.read(os.path.join(script_dir, '../../data/processed/camira_final.tbl'
 # Load the fractions and the cutouts
 fracs = np.load(fracs_path)[2]
 cutouts = h5py.File(cutouts_path)
+masks = np.load(masks_path)
 
 # Rank the clusters according to fracs
 ranked = np.argsort(fracs)
@@ -56,13 +58,14 @@ for i in range(len(ranked), len(axes.flat)):
 fig.tight_layout()
 fig.subplots_adjust(wspace=0.2, hspace=0.2)
 
-gs = GridSpec(1,1)
+gs = GridSpec(1,2)
 
 class View():
     def __init__(self):
         self.all_visible = True
         self.opos = None
         self.otitle = None
+        self.selected_axis = None
 
     def view(self, evt):
         if evt.inaxes:
@@ -70,20 +73,28 @@ class View():
                 for ax in fig.axes:
                     if ax != evt.inaxes:
                         ax.set_visible(False)
+                self.selected_axis = evt.inaxes
                 self.opos = evt.inaxes.get_position()
                 evt.inaxes.set_position(gs[0].get_position(fig))
                 self.otitle = int(evt.inaxes.get_title())
                 idx = ranked[self.otitle]
+                mask = masks[idx][:np.max(np.nonzero(masks[idx])),:np.max(np.nonzero(masks[idx]))]
+                ax = fig.add_subplot(gs[0,1])
+                ax.imshow(stretch(mask))
+                ax.set_xticks([])
+                ax.set_yticks([])
                 evt.inaxes.set_title(f'{idx}: {fracs[idx]}')
                 self.all_visible = False
             else:
+                fig.axes[-1].remove()
                 for ax in fig.axes:
                     ax.set_visible(True)
-                evt.inaxes.set_position(self.opos)
-                evt.inaxes.set_title(self.otitle, pad=0., fontdict={'fontsize': 5})
+                self.selected_axis.set_position(self.opos)
+                self.selected_axis.set_title(self.otitle, pad=0., fontdict={'fontsize': 5})
                 self.all_visible = True
                 self.opos = None
                 self.otitle = None
+                self.selected_axis = None
             fig.canvas.draw_idle()
 
 v = View()

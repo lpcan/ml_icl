@@ -12,6 +12,7 @@ from multiprocessing.shared_memory import SharedMemory
 import numpy as np
 import os
 from photutils.background import Background2D
+from scipy import spatial
 from scipy.interpolate import CloughTocher2DInterpolator
 import sys
 import tqdm
@@ -168,6 +169,9 @@ def calc_icl_frac(args):
     shmem = SharedMemory(name=f'iclbuf', create=False)
     fracs = np.ndarray((3, int(length/3)), buffer=shmem.buf, dtype=np.float64)
 
+    maskshmem = SharedMemory(name='maskbuf', create=False)
+    masks = np.ndarray((int(length/3), 2208, 2208), buffer=maskshmem.buf, dtype=np.float64)
+
     # Parameters
     cosmo = FlatLambdaCDM(H0=68.4, Om0=0.301)
 
@@ -252,7 +256,36 @@ def calc_icl_frac(args):
         # Convert the SB image back to counts
         counts_img = sb2counts(sb_img)
 
+        # Make the circular mask
+        # Get the BCG's label
+        mid = (cutout.shape[0] // 2, cutout.shape[1] // 2)
+        bcg_label = cold_labels[mid[0], mid[1]]
+
+        # Coordinates of points that are part of the BCG
+        pts = np.array(np.argwhere(cold_labels == bcg_label))
+
+        # Find points that are furthest apart
+        candidates = pts[spatial.ConvexHull(pts).vertices]
+        dist_mat = spatial.distance_matrix(candidates, candidates)
+        i, j = np.unravel_index(dist_mat.argmax(), dist_mat.shape)
+        pt1 = candidates[i]
+        pt2 = candidates[j]
+
+        size = np.sqrt((pt1[0] - pt2[0])**2 + (pt1[1] - pt2[1])**2)
+
+        radius = size
+        # Generate the mask
+        centre = (cutout.shape[1] // 2, cutout.shape[0] // 2)
+        Y, X = np.ogrid[:cutout.shape[0], :cutout.shape[1]]
+        dist_from_centre = np.sqrt((X-centre[0])**2 + (Y-centre[1])**2)
+        circ_mask = dist_from_centre <= radius
+
         masked_img = counts_img * ~bad_mask * member_mask * circ_mask
+
+        # Save the mask
+        l = np.max((np.min(np.nonzero(circ_mask)), 0))
+        h = np.min((np.max(np.nonzero(circ_mask)), np.max(cutout.shape)-1))
+        masks[key,0:h-l,0:h-l] = (cutout * ~bad_mask * member_mask * circ_mask * mask)[l:h,l:h]
 
         fracs[0,key] = np.nansum(masked_img * mask)
         fracs[1,key] = np.nansum(masked_img)
@@ -280,6 +313,8 @@ def calc_icl_frac_parallel(cutouts, zs, richness, merged):
         mem_id = 'iclbuf'
         nbytes = len(cutouts.keys()) * 3 * np.float64(1).nbytes 
         iclmem = SharedMemory(name='iclbuf', create=True, size=nbytes)
+        nbytes = len(cutouts.keys()) * 2208**2 * np.float64(1).nbytes # Max size of circ mask is 2208^2 px
+        maskmem = SharedMemory(name='maskbuf', create=True, size=nbytes)
 
         # Start a new process for each task
         ctx = mp.get_context()
@@ -297,13 +332,17 @@ def calc_icl_frac_parallel(cutouts, zs, richness, merged):
             # Copy the result
             result = np.ndarray((3, len(cutouts.keys())), buffer=iclmem.buf,
                                 dtype=np.float64).copy()
+            masks = np.ndarray((len(cutouts.keys()), 2208, 2208), buffer=maskmem.buf,
+                               dtype=np.float64).copy()
     finally:
         # Close the shared memory
         iclmem.close()
         iclmem.unlink()
+        maskmem.close()
+        maskmem.unlink()
         if exit:
             sys.exit(1)
-    return result 
+    return result, masks
 
 if __name__ == '__main__':
     # Parameters and things
@@ -326,7 +365,7 @@ if __name__ == '__main__':
     merged = join(members, tbl, keys_left=['RA_cl', 'Dec_cl'], keys_right=['RA [deg]', 'Dec [deg]'])
     merged = merged['ID', 'Name', 'RA_cl', 'Dec_cl', 'z_cl', 'RA', 'Dec']
 
-    fracs = calc_icl_frac_parallel(cutouts, zs, richness, merged)
+    fracs, masks = calc_icl_frac_parallel(cutouts, zs, richness, merged)
 
     ranked = np.argsort(fracs[2])
     mask = ~np.isnan(fracs[2][ranked]) # Don't include nans in the top 5
@@ -336,3 +375,4 @@ if __name__ == '__main__':
     print(list(zip(bottom_5, fracs[2][bottom_5])))
 
     np.save('fracs.npy', fracs) 
+    np.save('masks.npy', masks)
