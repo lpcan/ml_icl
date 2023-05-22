@@ -273,7 +273,7 @@ def calc_icl_frac(args):
 
         size = np.sqrt((pt1[0] - pt2[0])**2 + (pt1[1] - pt2[1])**2)
 
-        radius = size
+        radius = np.max((size, cosmo.arcsec_per_kpc_proper(zs[int(key)]).value * 100 * 1/0.168))
         # Generate the mask
         centre = (cutout.shape[1] // 2, cutout.shape[0] // 2)
         Y, X = np.ogrid[:cutout.shape[0], :cutout.shape[1]]
@@ -284,7 +284,7 @@ def calc_icl_frac(args):
 
         # Save the mask
         l = np.max((np.min(np.nonzero(circ_mask)), 0))
-        h = np.min((np.max(np.nonzero(circ_mask)), np.max(cutout.shape)-1))
+        h = np.min((np.max(np.nonzero(circ_mask)), np.min(cutout.shape)-1))
         masks[key,0:h-l,0:h-l] = (cutout * ~bad_mask * member_mask * circ_mask * mask)[l:h,l:h]
 
         fracs[0,key] = np.nansum(masked_img * mask)
