@@ -4,7 +4,8 @@ Define new data augmentations to be used by the model
 
 import tensorflow as tf
 from tensorflow import keras
-from tensorflow.keras import layers
+import tensorflow_addons as tfa
+from keras import layers
 
 class RandomResizedCrop(layers.Layer):
     """
@@ -70,6 +71,21 @@ class RandomGaussianNoise(layers.Layer):
         images += 3 * self.stddev * tf.random.normal(tf.shape(images))
         return images
 
+class GaussianSmooth(layers.Layer):
+    def __init__(self, prob=0.5):
+        super().__init__()
+        self.prob = prob
+    
+    def call(self, images):
+        # Generate Gaussian smoothed images
+        smoothed = tfa.image.gaussian_filter2d(images, filter_shape=5, sigma=3.)
+
+        # Generate random numbers between 0 and 1
+        random_nums = tf.random.uniform((tf.shape(images)[0],1,1,1), 0.0, 1.0)
+
+        # Select the smoothed version with probability `self.prob`
+        return tf.where(random_nums < self.prob, smoothed, images)
+        
 def augmenter(input_shape):
     return keras.Sequential(
         [
@@ -77,6 +93,7 @@ def augmenter(input_shape):
             layers.RandomFlip(mode="horizontal_and_vertical"),
             RandomResizedCrop(scale=(0.5, 1.0), ratio=(3/4, 4/3), prob_ratio_change=0.5, jitter_max=0.1),
             RandomGaussianNoise(stddev=0.017359),
+            GaussianSmooth(prob=0.5),
             # other augmentations? rotation, gaussian smoothing, etc?
         ]
     )
