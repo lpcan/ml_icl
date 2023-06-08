@@ -86,14 +86,15 @@ class GaussianSmooth(layers.Layer):
         # Select the smoothed version with probability `self.prob`
         return tf.where(random_nums < self.prob, smoothed, images)
         
-def augmenter(input_shape):
+def augmenter(input_shape, crop_scale=(0.5,1.0), crop_ratio=3/4, crop_prob=0.5,
+              crop_jitter_max=0.1, smooth_prob=0.5):
     return keras.Sequential(
         [
             layers.Input(shape=input_shape),
             layers.RandomFlip(mode="horizontal_and_vertical"),
-            RandomResizedCrop(scale=(0.5, 1.0), ratio=(3/4, 4/3), prob_ratio_change=0.5, jitter_max=0.1),
+            RandomResizedCrop(scale=crop_scale, ratio=(crop_ratio, 1/crop_ratio), prob_ratio_change=crop_prob, jitter_max=crop_jitter_max),
             RandomGaussianNoise(stddev=0.017359),
-            GaussianSmooth(prob=0.5),
-            # other augmentations? rotation, gaussian smoothing, etc?
+            GaussianSmooth(prob=smooth_prob),
+            # other augmentations? rotation, etc?
         ]
     )

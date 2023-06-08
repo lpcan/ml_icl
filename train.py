@@ -3,6 +3,7 @@ Train a self-supervised NNCLR model
 """
 from model import NNCLR
 
+import pickle
 import tensorflow as tf
 from tensorflow import keras
 import tensorflow_datasets as tfds
@@ -45,5 +46,16 @@ model.compile(
     contrastive_optimizer=keras.optimizers.Adam()
 )
 
+# Create a checkpoint callback
+cp_callback = tf.keras.callbacks.ModelCheckpoint(
+    filepath='checkpoint.ckpt',
+    save_weights_only=True,
+    verbose=1
+)
+
 # Train the model
-pretrain_history = model.fit(dataset, epochs=num_epochs)
+train_history = model.fit(dataset, epochs=num_epochs, callbacks=[cp_callback])
+
+# Save the history
+with open('history.pkl', 'wb') as f:
+    pickle.dump(train_history, f)
