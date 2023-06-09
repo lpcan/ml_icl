@@ -121,7 +121,7 @@ def counts2sb(counts, z):
 def sb2counts(sb): # without reaccounting for dimming
     return 10**(-0.4*(sb - 2.5*np.log10(63095734448.0194) - 5.*np.log10(0.168)))
 
-def create_cold_labels(cutout, bad_mask, background):
+def create_cold_labels(cutout, bad_mask):
     # First apply the bright star mask
     mask_input = np.array(cutout)
     mask_input[bad_mask] = np.nan
@@ -130,6 +130,9 @@ def create_cold_labels(cutout, bad_mask, background):
     kernel = Gaussian2DKernel(5)
     kernel.normalize()
     convolved = convolve(mask_input, kernel)
+    
+    # Background estimate
+    background = Background2D(cutout, box_size=cutout.shape[0] // 14, mask=bad_mask).background
     
     # Detect threshold
     threshold = detect_threshold(mask_input, nsigma=1.1, background=background, mask=bad_mask)
@@ -211,7 +214,7 @@ def calc_icl_frac(args):
         sb_img = counts2sb(bkg_subtracted, 0)
 
         # Segment the image
-        cold_labels = create_cold_labels(cutout, bad_mask, bkg)
+        cold_labels = create_cold_labels(cutout, bad_mask)
 
         # Create the cold mask from the labels
         cold_mask = enlarge_mask(cold_labels, sigma=2)
@@ -220,13 +223,6 @@ def calc_icl_frac(args):
         kernel = Gaussian2DKernel(5)
         conv_img = convolve(np.array(cutout), kernel)
         unsharp = np.array(cutout) - conv_img
-
-        # Check again for exclusion
-        inner_frac_masked = np.sum(bad_mask * cold_mask * circ_mask) / np.sum(circ_mask)
-        if inner_frac_masked > 0.2:
-            # >20% of inner region masked or middle pixel is masked
-            fracs[:,key] = np.nan
-            continue
 
         # Create the hot mask
         hot_mask_bkg = background_estimate(unsharp, z=zs[key], cosmo=cosmo, mask=(bad_mask))
@@ -273,12 +269,21 @@ def calc_icl_frac(args):
 
         size = np.sqrt((pt1[0] - pt2[0])**2 + (pt1[1] - pt2[1])**2)
 
-        radius = np.max((size, cosmo.arcsec_per_kpc_proper(zs[int(key)]).value * 100 * 1/0.168))
+        # Make sure that the radius is >=100kpc
+        radius = np.max((size, cosmo.arcsec_per_kpc_proper(zs[key]).value * 100 * 1/0.168))
+
         # Generate the mask
         centre = (cutout.shape[1] // 2, cutout.shape[0] // 2)
         Y, X = np.ogrid[:cutout.shape[0], :cutout.shape[1]]
         dist_from_centre = np.sqrt((X-centre[0])**2 + (Y-centre[1])**2)
         circ_mask = dist_from_centre <= radius
+
+        # Check again for exclusion
+        inner_frac_masked = np.sum(bad_mask * circ_mask) / np.sum(circ_mask)
+        if inner_frac_masked > 0.2:
+            # >20% of inner region masked or middle pixel is masked
+            fracs[:,key] = np.nan
+            continue
 
         masked_img = counts_img * ~bad_mask * member_mask * circ_mask
 
