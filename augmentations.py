@@ -21,7 +21,9 @@ class RandomResizedCrop(layers.Layer):
         self.jitter_max = jitter_max
 
     def call(self, images):
-        batch_size, height, width, _ = tf.shape(images)
+        batch_size = tf.shape(images)[0]
+        height = tf.shape(images)[1]
+        width = tf.shape(images)[2]
 
         # Determine the maximum allowed zoom amount
         mid = [height // 2, width // 2]
@@ -31,17 +33,17 @@ class RandomResizedCrop(layers.Layer):
         wests = tf.reverse(images[:, mid[0], 0:mid[1], :], axis=[1])
         easts = images[:, mid[0], mid[1]:]
 
-        max_widths = tf.ones(batch_size, dtype=tf.dtypes.int64) * 20 # Impose minimum width of 40x40 box
+        max_widths = tf.ones(batch_size, dtype=tf.dtypes.int32) * 20 # Impose minimum width of 40x40 box
 
         for lines in [norths, souths, wests, easts]:
-            widths = tf.squeeze(tf.math.argmax(lines < 0.006, axis=1)) # Find half widths of peaks
+            widths = tf.squeeze(tf.math.argmax(lines < 0.006, axis=1, output_type=tf.dtypes.int32)) # Find half widths of peaks
             widths_fixed = tf.where(widths == 0, height // 2, widths) # If not found, default to normal size of image
             max_widths = tf.math.maximum(max_widths, widths_fixed) # Find the new maximum widths
 
-        max_zoom = max_widths * 2 / height
+        max_zoom = tf.cast(max_widths * 2 / height, dtype=tf.dtypes.float32)
 
         # Draw uniformly random scales up to the maximum zoom amount
-        random_scales = tf.random.uniform((batch_size,), max_zoom, 1.)
+        random_scales = tf.random.uniform((batch_size,), minval=max_zoom, maxval=1.)
 
         # Apply image stretching with probability `prob_ratio_change`
         random_ratios = tf.random.uniform((batch_size,), self.ratio[0], self.ratio[1]) # Draw uniformly distributed aspect ratios
