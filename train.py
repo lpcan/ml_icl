@@ -32,7 +32,7 @@ def preprocess(data):
 # Prepare the dataset
 initial_dataset = (tfds.load('hsc_icl', split='train', shuffle_files=True)
            .shuffle(buffer_size=shuffle_buffer)
-           .batch(batch_size)
+           .batch(batch_size, drop_remainder=True)
 )
 
 # Preprocess the dataset
@@ -48,7 +48,7 @@ model.compile(
 
 # Create a checkpoint callback
 cp_callback = tf.keras.callbacks.ModelCheckpoint(
-    filepath='checkpoint.ckpt',
+    filepath='int_checkpoint',
     save_weights_only=True,
     verbose=1
 )
@@ -58,4 +58,4 @@ train_history = model.fit(dataset, epochs=num_epochs, callbacks=[cp_callback])
 
 # Save the history
 with open('history.pkl', 'wb') as f:
-    pickle.dump(train_history, f)
+    pickle.dump(train_history.history, f)
