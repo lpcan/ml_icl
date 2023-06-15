@@ -48,7 +48,7 @@ model.compile(
 
 # Create a checkpoint callback
 cp_callback = tf.keras.callbacks.ModelCheckpoint(
-    filepath='int_checkpoint',
+    filepath='checkpoint.ckpt',
     save_weights_only=True,
     verbose=1
 )

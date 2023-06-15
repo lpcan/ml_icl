@@ -4,7 +4,6 @@ Define new data augmentations to be used by the model
 
 import tensorflow as tf
 from tensorflow import keras
-import tensorflow_addons as tfa
 from keras import layers
 
 class RandomResizedCrop(layers.Layer):
@@ -57,6 +56,10 @@ class RandomResizedCrop(layers.Layer):
         jitter_y = tf.random.uniform((batch_size,), -self.jitter_max, self.jitter_max)
         jitter_x = tf.random.uniform((batch_size,), -self.jitter_max, self.jitter_max)
 
+        # Don't jitter more than zoom_scale
+        jitter_y = tf.math.minimum(random_scales, jitter_y)
+        jitter_x = tf.math.minimum(random_scales, jitter_x)
+
         height_offsets = tf.clip_by_value((1-new_heights)/2 + jitter_y, 0, 1-new_heights)
         width_offsets = tf.clip_by_value((1-new_widths)/2 + jitter_x, 0, 1-new_widths)
 
@@ -86,21 +89,6 @@ class RandomGaussianNoise(layers.Layer):
         # Add some random noise
         images += 3 * self.stddev * tf.random.normal(tf.shape(images))
         return images
-
-class GaussianSmooth(layers.Layer):
-    def __init__(self, prob=0.5):
-        super().__init__()
-        self.prob = prob
-    
-    def call(self, images):
-        # Generate Gaussian smoothed images
-        smoothed = tfa.image.gaussian_filter2d(images, filter_shape=5, sigma=3.)
-
-        # Generate random numbers between 0 and 1
-        random_nums = tf.random.uniform((tf.shape(images)[0],1,1,1), 0.0, 1.0)
-
-        # Select the smoothed version with probability `self.prob`
-        return tf.where(random_nums < self.prob, smoothed, images)
         
 def augmenter(input_shape, crop_ratio=3/4, crop_prob=0.5,
               crop_jitter_max=0.1, smooth_prob=0.5):
@@ -110,7 +98,6 @@ def augmenter(input_shape, crop_ratio=3/4, crop_prob=0.5,
             layers.RandomFlip(mode="horizontal_and_vertical"),
             RandomResizedCrop(ratio=(crop_ratio, 1/crop_ratio), prob_ratio_change=crop_prob, jitter_max=crop_jitter_max),
             RandomGaussianNoise(stddev=0.017359),
-            GaussianSmooth(prob=smooth_prob),
             # other augmentations? rotation, etc?
         ]
     )
