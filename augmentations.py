@@ -91,7 +91,7 @@ class RandomGaussianNoise(layers.Layer):
         return images
         
 def augmenter(input_shape, crop_ratio=3/4, crop_prob=0.5,
-              crop_jitter_max=0.1, smooth_prob=0.5):
+              crop_jitter_max=0.1):
     return keras.Sequential(
         [
             layers.Input(shape=input_shape),
