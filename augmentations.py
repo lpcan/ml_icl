@@ -89,15 +89,36 @@ class RandomGaussianNoise(layers.Layer):
         # Add some random noise
         images += 3 * self.stddev * tf.random.normal(tf.shape(images))
         return images
-        
-def augmenter(input_shape, crop_ratio=3/4, crop_prob=0.5,
-              crop_jitter_max=0.1):
+
+class RandomBrightness(layers.Layer):
+    def __init__(self, max_delta):
+        super().__init__()
+        self.max_delta = max_delta
+
+    def call(self, images):
+        batch_size = tf.shape(images)[0]
+        min_values = tf.reduce_min(images, axis=[1, 2, 3]) # Calculate minimum of each image
+        max_value = 10 # Don't allow images to be brighter than 10
+
+        # Select random brightness factors for each image in the batch
+        brightness_factor = tf.random.uniform((batch_size,), -self.max_delta, self.max_delta)
+        brightness_factor = brightness_factor[:, tf.newaxis, tf.newaxis, tf.newaxis]
+
+        # Multiply the image by the brightness factors (we need to keep ICL 
+        # invariant, so can't add)
+        images = images * (1 + brightness_factor)
+
+        return images
+
+
+def augmenter(input_shape, crop_ratio=1., crop_prob=0.5,
+              crop_jitter_max=0.2, max_brightness_change=0.5):
     return keras.Sequential(
         [
             layers.Input(shape=input_shape),
             layers.RandomFlip(mode="horizontal_and_vertical"),
             RandomResizedCrop(ratio=(crop_ratio, 1/crop_ratio), prob_ratio_change=crop_prob, jitter_max=crop_jitter_max),
             RandomGaussianNoise(stddev=0.017359),
-            # other augmentations? rotation, etc?
+            RandomBrightness(max_delta=max_brightness_change)
         ]
     )
