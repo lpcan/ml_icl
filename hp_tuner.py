@@ -32,18 +32,18 @@ def get_spearman_coeff(y_true, y_pred):
 # Define a HyperModel to do the hyperparameter tuning
 class HyperModel(keras_tuner.HyperModel):
     def build(self, hp):
-        temperature = hp.Float('temperature', min_value=0.05, max_value=0.5, step=0.05)
         model = NNCLR(input_shape=input_shape,
                       temperature=temperature,
                       queue_size=queue_size)
         # Define a new augmenter with tuneable hyperparameters
         aug = augmenter(input_shape=input_shape,
                         crop_ratio=hp.Float('crop_ratio', min_value=1/2, max_value=1, step=0.25),
-                        crop_jitter_max=hp.Float('jitter_max', min_value=0.1, max_value=0.3, step=0.1))
+                        crop_jitter_max=0.2,
+                        max_brightness_change=hp.Float('max_brightness_change', min_value=0.1, max_value=0.7, step=0.1))
         model.contrastive_augmenter = aug # Replace the augmenter in the model
 
         # Also tune the optimiser learning rate
-        lr = hp.Float('lr', min_value=1e-4, max_value=1e-2, sampling='log')
+        lr = hp.Float('lr', min_value=1e-4, max_value=1e-3, sampling='log')
 
         model.compile(
             contrastive_optimizer=keras.optimizers.Adam(learning_rate=lr)
