@@ -12,6 +12,7 @@ from multiprocessing.shared_memory import SharedMemory
 import numpy as np
 import os
 from photutils.background import Background2D
+import scipy
 from scipy import spatial
 from scipy.interpolate import CloughTocher2DInterpolator
 import sys
@@ -166,7 +167,7 @@ def calc_icl_frac(args):
     keys, length, zs, richness, merged = args
 
     base_path = os.path.dirname(__file__)
-    cutouts = h5py.File(base_path + '/../cutouts_550.hdf') #'/../processed/cutouts.hdf')
+    cutouts = h5py.File('/srv/scratch/z5214005/cutouts_550.hdf') #'/../processed/cutouts.hdf')
 
     # Find the shared memory and create a numpy array interface
     shmem = SharedMemory(name=f'iclbuf', create=False)
@@ -209,10 +210,6 @@ def calc_icl_frac(args):
         bkg = background_estimate(cutout, zs[key], cosmo, mask=bad_mask)
         bkg_subtracted = cutout - bkg
 
-        # Convert image from counts to surface brightness
-        np.seterr(invalid='ignore', divide='ignore')
-        sb_img = counts2sb(bkg_subtracted, 0)
-
         # Segment the image
         cold_labels = create_cold_labels(cutout, bad_mask)
 
@@ -232,25 +229,14 @@ def calc_icl_frac(args):
         # Mark the cluster members in the cold mask
         x_locs, y_locs = get_member_locs(int(key), merged, cutout.shape)
         c_members = cold_labels[y_locs.astype(int), x_locs.astype(int)]
+
+        # Mask out non cluster members
         member_mask = np.isin(cold_labels, c_members) | (cold_labels == 0)
         non_member_mask = ~member_mask
         non_member_mask = enlarge_mask(non_member_mask, sigma=2)
         non_member_mask = non_member_mask + hot_mask
+        # Member mask keeps the background and cluster members
         member_mask = ~non_member_mask
-
-        # Calculate surface brightness limit (from Cristina's code (Roman+20))
-        _, _, stddev = sigma_clipped_stats(bkg_subtracted, mask=bad_mask)
-        sb_lim = -2.5 * np.log10(3*stddev/(0.168 * 10)) + 2.5 * np.log10(63095734448.0194)
-
-        # Mask out the values below surface brightness limit
-        sb_img[sb_img >= sb_lim] = np.nan
-
-        # Mask above the surface brightness threshold
-        threshold = 25 + 10 * np.log10(1 + zs[int(key)])
-        mask = sb_img > threshold
-
-        # Convert the SB image back to counts
-        counts_img = sb2counts(sb_img)
 
         # Make the circular mask
         # Get the BCG's label
@@ -284,6 +270,24 @@ def calc_icl_frac(args):
             # >20% of inner region masked or middle pixel is masked
             fracs[:,key] = np.nan
             continue
+
+        # Calculate surface brightness limit (from Cristina's code (Roman+20))
+        _, _, stddev = sigma_clipped_stats(bkg_subtracted, mask=bad_mask)
+        sb_lim = -2.5 * np.log10(3*stddev/(0.168 * 10)) + 2.5 * np.log10(63095734448.0194)
+
+        # Convert image from counts to surface brightness
+        np.seterr(invalid='ignore', divide='ignore')
+        sb_img = counts2sb(bkg_subtracted, 0)
+
+        # Mask out the values below surface brightness limit
+        sb_img[sb_img >= sb_lim] = np.nan
+
+        # Mask above the surface brightness threshold
+        threshold = 25 + 10 * np.log10(1 + zs[int(key)])
+        mask = sb_img > threshold
+
+        # Convert the SB image back to counts
+        counts_img = sb2counts(sb_img)
 
         masked_img = counts_img * ~bad_mask * member_mask * circ_mask
 
@@ -356,14 +360,14 @@ if __name__ == '__main__':
     base_path = os.path.dirname(__file__)
 
     # Load the cutouts and the corresponding redshifts
-    cutouts = h5py.File(base_path + '/../cutouts_550.hdf') #'/../processed/cutouts.hdf')
-    tbl = ascii.read(base_path + '/../../data/processed/camira_final.tbl', #'/../processed/camira_final.tbl', 
+    cutouts = h5py.File('/srv/scratch/z5214005/cutouts_550.hdf') #'/../processed/cutouts.hdf')
+    tbl = ascii.read('/srv/scratch/z5214005/camira_final.tbl', #'/../processed/camira_final.tbl', 
                     names=['ID', 'Name', 'RA [deg]', 'Dec [deg]', 'z', 'Richness', 'BCG z'])
     zs = tbl['z']
     richness = tbl['Richness']
     
     # Load the cluster member catalogue
-    members = ascii.read(base_path + '/../../data/raw/camira_s20a_dud_member.dat', 
+    members = ascii.read('/srv/scratch/z5214005/camira_s20a_dud_member.dat', 
                         names=['RA_cl', 'Dec_cl', 'Richness', 'z_cl', 'RA', 'Dec', 'M', 'w'])
 
     # Match this catalogue to the cluster catalogue
@@ -379,5 +383,5 @@ if __name__ == '__main__':
     print(list(zip(top_5, fracs[2][top_5])))
     print(list(zip(bottom_5, fracs[2][bottom_5])))
 
-    np.save('fracs.npy', fracs) 
-    np.save('masks.npy', masks)
+    np.save('/srv/scratch/z5214005/bcgicl_fracs.npy', fracs) 
+    np.save('/srv/scratch/z5214005/bcgicl_masks.npy', masks)
