@@ -160,14 +160,36 @@ class RadialShuffle(layers.Layer):
         # TODO: make this sensible (currently horrible)
         return tf.map_fn(self.process_one, images)
 
+class RandomDrop(layers.Layer):
+    def __init__(self, drop_percentage=0.2):
+        super().__init__()
+        self.drop_percentage = drop_percentage
+
+    def call(self, images):
+        # Randomly mask out `drop_percentage` of the pixels in the image
+        random_px = tf.random.uniform(tf.shape(images))
+        masked_imgs = tf.where(random_px < self.drop_percentage, np.nan, images)
+        return masked_imgs
+
 def augmenter(input_shape, crop_ratio=3/4, crop_prob=0.5,
-              crop_jitter_max=0.1, shuffle_fraction=0.5):
+              crop_jitter_max=0.1, drop_percentage=0.2):
     return keras.Sequential(
         [
             layers.Input(shape=input_shape),
+            layers.Normalization(mean=0.948, variance=1.108**2),
             layers.RandomFlip(mode="horizontal_and_vertical"),
+            # RadialShuffle(input_shape=input_shape, shuffle_fraction=shuffle_fraction),
             RandomResizedCrop(ratio=(crop_ratio, 1/crop_ratio), prob_ratio_change=crop_prob, jitter_max=crop_jitter_max),
             RandomGaussianNoise(stddev=0.017359),
-            RadialShuffle(input_shape=input_shape, shuffle_fraction=shuffle_fraction)
+            RandomDrop(drop_percentage=drop_percentage)
+        ]
+    )
+
+def val_augmenter(input_shape, shuffle_fraction=0.5):
+    return keras.Sequential(
+        [
+            layers.Input(shape=input_shape),
+            layers.Normalization(mean=0.948, variance=1.108**2),
+            # RadialShuffle(input_shape=input_shape, shuffle_fraction=shuffle_fraction),
         ]
     )

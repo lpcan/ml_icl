@@ -64,7 +64,11 @@ def eval_model(checkpoint_path = 'checkpoint.ckpt'):
     validation_imgs = tf.data.Dataset.from_tensors(validation_imgs)
 
     # Get the embeddings
-    embeddings = model.predict(validation_imgs)
+    from augmentations import val_augmenter
+    augmenter = val_augmenter(input_shape=(224,224,1))
+    for batch in validation_imgs:
+        validation_imgs = augmenter(batch)
+    embeddings = model.encoder(validation_imgs)
 
     # Calculate the Spearman rank coefficient
     coeff = calc_spearman(embeddings)
