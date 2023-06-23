@@ -3,7 +3,7 @@ Code to automatically tune data augmentation hyperparameters.
 Vaguely following code from https://keras.io/guides/keras_tuner/getting_started/#custom-metric-as-the-objective
 """
 
-from augmentations import augmenter
+from augmentations import augmenter, val_augmenter
 from model import NNCLR
 
 import keras_tuner
@@ -36,10 +36,11 @@ class HyperModel(keras_tuner.HyperModel):
                       temperature=temperature,
                       queue_size=queue_size)
         # Define a new augmenter with tuneable hyperparameters
+        self.shuffle_fraction = hp.Float('shuffle_fraction', min_value=0, max_value=1, step=0.1)
         aug = augmenter(input_shape=input_shape,
-                        crop_ratio=hp.Float('crop_ratio', min_value=1/2, max_value=1, step=0.25),
-                        crop_jitter_max=0.2,
-                        max_brightness_change=hp.Float('max_brightness_change', min_value=0.1, max_value=0.7, step=0.1))
+                        crop_ratio=0.75,
+                        crop_jitter_max=0.1,
+                        shuffle_fraction=self.shuffle_fraction)
         model.contrastive_augmenter = aug # Replace the augmenter in the model
 
         # Also tune the optimiser learning rate
@@ -56,7 +57,10 @@ class HyperModel(keras_tuner.HyperModel):
 
         # Calculate Spearman's rank coefficient (validation test)
         x_val, fracs = validation_data
-        y_pred = model.predict(x_val)
+        augmenter = val_augmenter(input_shape=input_shape, shuffle_fraction = self.shuffle_fraction)
+        for batch in x_val:
+            aug_x = augmenter(batch)
+        y_pred = model.encoder(aug_x)
         
         # Rank the encodings
         cluster_51 = y_pred[51]

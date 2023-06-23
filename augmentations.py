@@ -2,6 +2,7 @@
 Define new data augmentations to be used by the model
 """
 
+import numpy as np
 import tensorflow as tf
 from tensorflow import keras
 from keras import layers
@@ -90,35 +91,105 @@ class RandomGaussianNoise(layers.Layer):
         images += 3 * self.stddev * tf.random.normal(tf.shape(images))
         return images
 
-class RandomBrightness(layers.Layer):
-    def __init__(self, max_delta):
+class RadialShuffle(layers.Layer):
+    def __init__(self, input_shape, shuffle_fraction=0.5):
         super().__init__()
-        self.max_delta = max_delta
+        self.shuffle_fraction = shuffle_fraction
+        self.height = input_shape[0]
+        self.width = input_shape[1]
+
+        # Precomputations
+        centre = (input_shape[0] // 2, input_shape[1] // 2)
+        Y, X = np.ogrid[:224, :224]
+        # Prepare the radial and angle maps
+        self.dist_map = tf.convert_to_tensor(np.round(np.sqrt((X-centre[0])**2 + (Y-centre[1])**2)).astype(int))
+        ax2_indices = np.zeros(self.dist_map.shape)
+        self.num_rows = self.dist_map[0][0] + 1
+        dists, counts = np.unique(self.dist_map, return_counts = True)
+        for dist in range(self.num_rows):
+            ax2_indices[self.dist_map == dist] = np.arange(counts[dist]) # These are the 'angle' indices
+        self.num_cols = np.max(counts)
+        self.ax2_indices = tf.convert_to_tensor(ax2_indices.astype(int))
+
+    def process_one(self, image):
+        # Select `shuffle_fraction` random pixels
+        random_px = tf.random.uniform(image.shape) < self.shuffle_fraction
+        masked_img = tf.squeeze(tf.where(random_px == True, image, np.nan))
+
+        # Insert values to shuffle into the polar projection
+        dists_masked = self.dist_map[~tf.math.is_nan(masked_img)]
+        ax2_masked = self.ax2_indices[~tf.math.is_nan(masked_img)]
+
+        pol_ind = tf.stack([dists_masked, ax2_masked], axis=1) # [[x1, y1], [x2, y2]] format
+        polar_array = tf.fill((self.num_rows, self.num_cols), value=np.nan)
+        polar_array = tf.tensor_scatter_nd_update(polar_array, 
+                                                  indices=pol_ind, 
+                                                  updates=masked_img[~tf.math.is_nan(masked_img)])
+        
+        # Shuffle along the second axis. Code from https://stackoverflow.com/a/74870471
+        rnd = tf.argsort(tf.random.uniform(polar_array.shape), axis=1)
+        rnd = tf.concat([
+            tf.repeat(
+                tf.range(polar_array.shape[0])[...,tf.newaxis,tf.newaxis], 
+                tf.shape(rnd)[1], axis=1), 
+            rnd[...,tf.newaxis]], 
+            axis=2)
+        pol_arr_shuffled = tf.gather_nd(polar_array, rnd, batch_dims=0)
+
+        # Place the not nan values back where we expect to find them
+        nan_mask = tf.math.is_nan(pol_arr_shuffled)
+        sorted_inds = tf.argsort(dists_masked)
+        dists_sorted = tf.gather(dists_masked, sorted_inds)
+        ax2_sorted = tf.gather(ax2_masked, sorted_inds)
+        by_row_inds = tf.stack([dists_sorted, ax2_sorted], axis=1)
+        pol_arr_shuffled = tf.tensor_scatter_nd_update(pol_arr_shuffled, 
+                                                       indices=by_row_inds,
+                                                       updates=pol_arr_shuffled[~nan_mask])
+
+        # Create the final image
+        vals_to_insert = tf.gather_nd(pol_arr_shuffled, pol_ind)
+        image = tf.squeeze(image)
+        image = tf.tensor_scatter_nd_update(image,
+                                            indices=tf.reshape(tf.where(~tf.math.is_nan(masked_img)), [-1, 2]),
+                                            updates=vals_to_insert)
+        image = tf.expand_dims(image, 2)
+
+        return image
 
     def call(self, images):
-        batch_size = tf.shape(images)[0]
-        min_values = tf.reduce_min(images, axis=[1, 2, 3]) # Calculate minimum of each image
-        max_value = 10 # Don't allow images to be brighter than 10
+        # TODO: make this sensible (currently horrible)
+        return tf.map_fn(self.process_one, images)
 
-        # Select random brightness factors for each image in the batch
-        brightness_factor = tf.random.uniform((batch_size,), 1-self.max_delta, 1+self.max_delta)
-        brightness_factor = brightness_factor[:, tf.newaxis, tf.newaxis, tf.newaxis]
+class RandomDrop(layers.Layer):
+    def __init__(self, drop_percentage=0.2):
+        super().__init__()
+        self.drop_percentage = drop_percentage
 
-        # Multiply the image by the brightness factors (we need to keep ICL 
-        # invariant, so can't add)
-        images = images * brightness_factor
-
-        return images
-
+    def call(self, images):
+        # Randomly mask out `drop_percentage` of the pixels in the image
+        random_px = tf.random.uniform(tf.shape(images))
+        masked_imgs = tf.where(random_px < self.drop_percentage, np.nan, images)
+        return masked_imgs
 
 def augmenter(input_shape, crop_ratio=3/4, crop_prob=0.5,
-              crop_jitter_max=0.1, max_brightness_change=0.5):
+              crop_jitter_max=0.1, drop_percentage=0.2):
     return keras.Sequential(
         [
             layers.Input(shape=input_shape),
+            layers.Normalization(mean=0.948, variance=1.108**2),
             layers.RandomFlip(mode="horizontal_and_vertical"),
+            # RadialShuffle(input_shape=input_shape, shuffle_fraction=shuffle_fraction),
             RandomResizedCrop(ratio=(crop_ratio, 1/crop_ratio), prob_ratio_change=crop_prob, jitter_max=crop_jitter_max),
             RandomGaussianNoise(stddev=0.017359),
-            # RandomBrightness(max_delta=max_brightness_change)
+            RandomDrop(drop_percentage=drop_percentage)
+        ]
+    )
+
+def val_augmenter(input_shape, shuffle_fraction=0.5):
+    return keras.Sequential(
+        [
+            layers.Input(shape=input_shape),
+            layers.Normalization(mean=0.948, variance=1.108**2),
+            # RadialShuffle(input_shape=input_shape, shuffle_fraction=shuffle_fraction),
         ]
     )
