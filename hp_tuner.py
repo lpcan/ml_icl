@@ -36,11 +36,11 @@ class HyperModel(keras_tuner.HyperModel):
                       temperature=temperature,
                       queue_size=queue_size)
         # Define a new augmenter with tuneable hyperparameters
-        self.shuffle_fraction = hp.Float('shuffle_fraction', min_value=0, max_value=1, step=0.1)
+        
         aug = augmenter(input_shape=input_shape,
                         crop_ratio=0.75,
                         crop_jitter_max=0.1,
-                        shuffle_fraction=self.shuffle_fraction)
+                        cutout_height_width=hp.Float('cutout_height_width', min_value=0, max_value=0.5, step=0.05))
         model.contrastive_augmenter = aug # Replace the augmenter in the model
 
         # Also tune the optimiser learning rate
@@ -57,7 +57,7 @@ class HyperModel(keras_tuner.HyperModel):
 
         # Calculate Spearman's rank coefficient (validation test)
         x_val, fracs = validation_data
-        augmenter = val_augmenter(input_shape=input_shape, shuffle_fraction = self.shuffle_fraction)
+        augmenter = val_augmenter(input_shape=input_shape)
         for batch in x_val:
             aug_x = augmenter(batch)
         y_pred = model.encoder(aug_x)
