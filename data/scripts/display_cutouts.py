@@ -8,6 +8,7 @@ from astropy.io import fits
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Button
 import numpy as np
+import os
 import sys
 import re
 
@@ -75,4 +76,5 @@ if __name__ == "__main__":
     if len(sys.argv) > 1:
         main(sys.argv[1])
     else:
-        main("../raw/cutouts/")
+        script_dir = os.path.dirname(__file__) # Want paths relative to the script, not relative to current working directory
+        main(os.path.join(script_dir, "../raw/cutouts/"))
