@@ -54,3 +54,50 @@ def test_augmenter():
         plt.imshow(img)
         plt.show()
         break # Just show one example rather than all in the batch
+
+def mutual_information_exp():
+    from finetune import val_preprocess, checkpoint_path
+    from model import NNCLR
+
+    import tensorflow_datasets as tfds
+    import tensorflow as tf
+    import h5py
+    import numpy as np
+    from sklearn.feature_selection import mutual_info_regression
+    import seaborn as sns
+    import matplotlib.pyplot as plt
+
+    # Load train images
+    ds = tfds.load('finetuning_data', split='train')
+    np_ds = ds.as_numpy_iterator()
+    np_ds = sorted(np_ds, key=lambda x : x['id'])
+    np_ds = np.array(list(map(val_preprocess, np_ds)))
+    dataset = tf.data.Dataset.from_tensors(np_ds)
+
+    # Get all the fraction components
+    generated_data = h5py.File('/srv/scratch/z5214005/generated_data.hdf')
+    fracs = np.zeros((3, 400))
+    for key in generated_data.keys():
+        fracs[0][int(key) - 126] = generated_data[key]['ICL'][()]
+        fracs[1][int(key) - 126] = generated_data[key]['TOTAL'][()]
+        fracs[2][int(key) - 126] = generated_data[key]['FRAC'][()]
+
+    # Load the model
+    base_model = NNCLR(input_shape=(224,224,1), temperature=0.1, queue_size=1000)
+    base_model.load_weights(checkpoint_path).expect_partial()
+    encoder = base_model.encoder
+
+    # Predict the values
+    X = encoder.predict(dataset)
+
+    # Calculate mutual information
+    mi0 = mutual_info_regression(X, fracs[0])
+    mi1 = mutual_info_regression(X, fracs[1])
+
+    mi_diff = mi0 - mi1 # This is a number between -1 and 1, where -1 represents strong importance for fracs[1] and 1 is strong important for fracs[0]
+    mi1 = -mi1
+
+    matrix = np.row_stack([mi0, mi1, mi_diff])
+    plt.figure(figsize=(30,3), dpi=200)
+    sns.heatmap(matrix, cmap='seismic', center=0, annot=False)
+    plt.savefig('asdf.png')     
