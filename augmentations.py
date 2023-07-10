@@ -101,7 +101,7 @@ def augmenter(input_shape, crop_ratio=3/4, crop_prob=0.5,
             layers.RandomFlip(mode="horizontal_and_vertical"),
             RandomResizedCrop(ratio=(crop_ratio, 1/crop_ratio), prob_ratio_change=crop_prob, jitter_max=crop_jitter_max),
             RandomGaussianNoise(stddev=0.017359),
-            keras_cv.layers.preprocessing.RandomCutout(cutout_height_width, cutout_height_width)
+            keras_cv.layers.preprocessing.RandomCutout(cutout_height_width, cutout_height_width),
         ]
     )
 
@@ -110,5 +110,7 @@ def val_augmenter(input_shape):
         [
             layers.Input(shape=input_shape),
             layers.Normalization(mean=0.948, variance=1.108**2),
+            layers.RandomFlip(mode='horizontal_and_vertical'),
+            RandomGaussianNoise(stddev=0),
         ]
     )

@@ -12,10 +12,10 @@ stddev = 0.017359
 def stretch(img):
     return np.arcsinh(np.clip(img, a_min=0.0, a_max=10.0) / stddev)
 
-cutouts = h5py.File('data/processed/cutouts.hdf')
-zs = ascii.read('data/processed/camira_final.tbl')['z_cl']
+cutouts = h5py.File('/srv/scratch/z5214005/hsc_icl/cutouts.hdf')
+zs = ascii.read('/srv/scratch/z5214005/camira_final.tbl')['z_cl']
 
-generated_data = h5py.File('generated_data.hdf', 'w')
+generated_data = h5py.File('/srv/scratch/z5214005/generated_data_400.hdf', 'w')
 fracs = []
 
 for num in range(126,526):
@@ -31,6 +31,8 @@ for num in range(126,526):
     labels, _ = scipy.ndimage.label(bright_parts) # Label each bright section
     centre = (cutout.shape[0] // 2, cutout.shape[1] // 2)
     central_blob = bright_parts * (labels == labels[centre[0], centre[1]])
+    if np.sum(central_blob) == 0:
+        continue
     edges = scipy.spatial.ConvexHull(np.argwhere(central_blob)) # Convex hull of central blob
 
     distances = scipy.spatial.distance.cdist([centre], np.argwhere(central_blob)[edges.vertices])[0] # Distances to edges of shape
@@ -70,12 +72,16 @@ for num in range(126,526):
     img = img_no_noise + noise
 
     # Calculate the new artificial ICL fraction
-    icl = np.sum(icl_img)
+    sb_limit = 27 + 10 * np.log10(1+z) # Calculate the sb limit
+    limit = 10**(-0.4*(sb_limit - 2.5*np.log10(63095734448.0194) - 5.*np.log10(0.168))) # Convert to counts
+    icl = np.sum(icl_img[icl_img > limit])
     # total = np.sum(img_no_noise) # Total brightness (without considering noise)
     total = np.sum((cutout * central_blob) + icl_img)
     # Add to file
     generated_data[f'{num}/HDU0/DATA'] = img
     generated_data[f'{num}/FRAC'] = icl / total
+    generated_data[f'{num}/ICL'] = icl
+    generated_data[f'{num}/TOTAL'] = total
     
     # plt.figure(figsize=(8,4))
     # plt.subplot(131)
