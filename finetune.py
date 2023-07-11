@@ -4,6 +4,7 @@ from augmentations import augmenter
 import tensorflow as tf
 from tensorflow import keras
 import tensorflow_datasets as tfds
+import tensorflow_probability as tfp
 import pickle
 import numpy as np
 from scipy.stats import spearmanr
@@ -16,6 +17,8 @@ queue_size = 1000
 checkpoint_path = '/srv/scratch/z5214005/checkpoint'
 stddev = 0.017359 # Calculated elsewhere from first 1000 cutouts
 num_epochs = 100
+
+num_components = 16
 
 # Preprocessing function
 def preprocess(image, label):
@@ -46,9 +49,15 @@ def regression_model():
     s = tf.reduce_sum(base_model.encoder.losses)
     base_model.encoder.add_loss(lambda: -s)
         
-    x = keras.layers.Dense(256, activation='leaky_relu')(x)
-    outputs = keras.layers.Dense(1, activation='sigmoid')(x) # Regression layer
-    # outputs = keras.layers.Dense(1)(x)
+    x = keras.layers.Dense(256, activation='tanh')(x)
+
+    # Probabilistic modelling - from Francois's tutorial
+    x = keras.layers.Dense(units=num_components*3)(x)
+    outputs = tfp.layers.DistributionLambda(lambda t: tfp.distributions.Independent(
+        tfp.distributions.MixtureSameFamily(mixture_distribution=tfp.distributions.Categorical(logits=tf.expand_dims(t[..., :num_components], -2)),
+                              components_distribution=tfp.distributions.Beta(1 + tf.nn.softplus(tf.expand_dims(t[..., num_components:2*num_components], -2)),
+                                                               1 + tf.nn.softplus(tf.expand_dims(t[..., 2*num_components:],-2)))), 1))(x)    
+    # outputs = keras.layers.Dense(1, activation='sigmoid')(x) # Regression layer
 
     return keras.Model(inputs, outputs)
 
@@ -69,7 +78,7 @@ def make_graph(model, validation_data, filename='val_graph.png'):
     validation_imgs, fracs = validation_data
 
     # Run the model and calculate the Spearman coefficient
-    predictions = model.predict(validation_imgs).squeeze()
+    predictions = model(validation_imgs).mean().numpy().squeeze()
     rankings = np.argsort(np.argsort(predictions)[::-1])
     fracs_ordered = np.argsort(fracs)[::-1]
     fracs_rankings = np.argsort(fracs_ordered)
@@ -91,8 +100,11 @@ def make_graph(model, validation_data, filename='val_graph.png'):
 def finetune():
     model = regression_model()
 
+    # Using probabilistic model - change loss
+    negloglik = lambda y, p_y: -p_y.log_prob(y)
+
     model.compile(optimizer=keras.optimizers.Adam(learning_rate=0.005),
-                loss='mean_squared_error')
+                loss=negloglik)
 
     # Instantiate the dataset
     ds = (tfds.load('finetuning_data', split='train', shuffle_files=True, as_supervised=True)
