@@ -21,7 +21,7 @@ output_dir = os.path.join(script_dir, '../../cutouts_550kpc/') #"../raw/cutouts/
 rerun = "pdr2_dud"
 
 # HSC username: locan@local
-# HSC password: zyNtk1So2TUMMbDqInxXnRM3a759GyqChhGm6xmD
+# HSC password: 
 
 # Create a list of coordinates of the cluster locations
 tbl = ascii.read(cat_path, names = ['ID', 

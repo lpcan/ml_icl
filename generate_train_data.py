@@ -8,6 +8,9 @@ import numpy as np
 import scipy
 from skimage.morphology import binary_opening
 
+from photutils.segmentation import SourceFinder
+from astropy.stats import sigma_clipped_stats
+
 # Convenience function for plotting the images
 stddev = 0.017359
 def stretch(img):
@@ -38,32 +41,35 @@ def get_member_locs(idx, merged, cutout_shape):
     
     return (x_locs, y_locs)
 
-cutouts = h5py.File('data/processed/cutouts.hdf')
-tbl = ascii.read('data/processed/camira_final.tbl')
-zs = tbl['z_cl']
+cutouts = h5py.File('lrg_cutouts_resized.hdf')
+tbl = ascii.read('data/processed/lrgs_sampled.tbl')
+zs = tbl['z']
 
-# Load the cluster member catalogue
-members = ascii.read('data/raw/camira_s20a_wide_member.dat', 
-                    names=['RA_cl', 'Dec_cl', 'Richness', 'z_cl', 'RA', 'Dec', 'M', 'w'])
+# # Load the cluster member catalogue
+# members = ascii.read('data/raw/camira_s20a_wide_member.dat', 
+#                     names=['RA_cl', 'Dec_cl', 'Richness', 'z_cl', 'RA', 'Dec', 'M', 'w'])
 
-# Match this catalogue to the cluster catalogue
-merged = join(members, tbl, keys_left=['RA_cl', 'Dec_cl'], keys_right=['RA [deg]', 'Dec [deg]'])
-merged = merged['ID', 'Name', 'RA_cl', 'Dec_cl', 'z_cl_1', 'RA', 'Dec']
+# # Match this catalogue to the cluster catalogue
+# merged = join(members, tbl, keys_left=['RA_cl', 'Dec_cl'], keys_right=['RA [deg]', 'Dec [deg]'])
+# merged = merged['ID', 'Name', 'RA_cl', 'Dec_cl', 'z_cl_1', 'RA', 'Dec']
 
-generated_data = h5py.File('generated_data_400.hdf', 'w')
+generated_data = h5py.File('generated_data.hdf', 'w')
 fracs = []
+finder = SourceFinder(npixels=20, progress_bar=False)
 
-for num in range(126,226):
+for num in range(len(tbl)):
     print(f'{num}', end='\r')
-    cutout = cutouts[str(num)]['HDU0']['DATA']
+    cutout_id = tbl['new_ids'][num]
+    cutout = cutouts[cutout_id]['HDU0']['DATA']
 
     z = zs[num]
-    sb_threshold = 25 + 10 * np.log10(1+z) # Calculate mask threshold at this z
+    sb_threshold = 26 + 10 * np.log10(1+z) # Calculate mask threshold at this z
     threshold = 10**(-0.4*(sb_threshold - 2.5*np.log10(63095734448.0194) - 5.*np.log10(0.168))) # Convert to counts
 
     # Figure out what to use as r_eff
     bright_parts = (cutout > threshold)
-    labels, _ = scipy.ndimage.label(bright_parts) # Label each bright section
+    labels = finder(cutout, threshold).data
+    # labels, _ = scipy.ndimage.label(bright_parts) # Label each bright section
     centre = (cutout.shape[0] // 2, cutout.shape[1] // 2)
     central_blob = bright_parts * (labels == labels[centre[0], centre[1]])
     if np.sum(central_blob) == 0:
@@ -71,12 +77,13 @@ for num in range(126,226):
     edges = scipy.spatial.ConvexHull(np.argwhere(central_blob)) # Convex hull of central blob
 
     distances = scipy.spatial.distance.cdist([centre], np.argwhere(central_blob)[edges.vertices])[0] # Distances to edges of shape
-    r_eff = np.median(distances) # Vague estimate of size of central blob
+    r_eff = np.random.choice(distances) # Vague estimate of size of central blob
 
-    # Find the cluster members in the image
-    x_locs, y_locs = get_member_locs(num, merged, cutout.shape)
-    c_members = labels[y_locs.astype(int), x_locs.astype(int)]
-    member_mask = np.isin(labels, c_members) & labels.astype(bool)
+    # # Find the cluster members in the image
+    # x_locs, y_locs = get_member_locs(num, merged, cutout.shape)
+    # c_members = labels[y_locs.astype(int), x_locs.astype(int)]
+    # member_mask = np.isin(labels, c_members) & labels.astype(bool)
+    member_mask = central_blob 
 
     # Expand the masks of non central galaxies
     non_central_galaxies = bright_parts * ~central_blob 
@@ -90,8 +97,7 @@ for num in range(126,226):
 
     # Generate some random parameters for the profile
     amplitude = threshold
-    # n = np.random.randint(low=1, high=11)
-    n = 1
+    n = 1 # exponential profile
     ellip = np.random.uniform(low=0, high=0.5)
     theta = np.random.uniform(low=0, high=2*np.pi)
 
@@ -110,7 +116,9 @@ for num in range(126,226):
     noise = np.random.normal(loc=0, scale=std, size=cutout.shape)
 
     # Add to final image
-    img = img_no_noise + noise
+    # img = img_no_noise + noise
+    img = cutout + icl_img
+    img = img.astype('<f4')
 
     # Calculate the new artificial ICL fraction
     sb_limit = 28 + 10 * np.log10(1+z) # Calculate the sb limit
@@ -118,12 +126,14 @@ for num in range(126,226):
     icl = np.sum(icl_img[icl_img > limit])
 
     # total = np.sum(img_no_noise) # Total brightness (without considering noise)
-    total = np.sum((cutout * member_mask) + icl_img)
+    _, med, _ = sigma_clipped_stats(cutout)
+    total = np.sum(((np.array(cutout) - med) * member_mask) + icl_img)
+
     # Add to file
-    generated_data[f'{num}/HDU0/DATA'] = img
-    generated_data[f'{num}/FRAC'] = icl / total
-    generated_data[f'{num}/ICL'] = icl
-    generated_data[f'{num}/TOTAL'] = total
+    generated_data[f'{cutout_id}/HDU0/DATA'] = img
+    generated_data[f'{cutout_id}/FRAC'] = icl / total
+    generated_data[f'{cutout_id}/ICL'] = icl
+    generated_data[f'{cutout_id}/TOTAL'] = total
     
     # plt.figure(figsize=(8,4))
     # plt.subplot(131)
