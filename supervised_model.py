@@ -5,6 +5,7 @@ import tensorflow_datasets as tfds
 import tensorflow_probability as tfp
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib as mpl
 import sys
 
 import resnet_cifar10_v2
@@ -14,6 +15,7 @@ N = 2
 DEPTH = N*9+2
 NUM_BLOCKS = ((DEPTH - 2) // 9) - 1
 stddev = 0.017359
+num_components = 16
 
 # Idk where to put this for now
 from scipy.stats import gaussian_kde
@@ -34,13 +36,13 @@ def get_weights(dataset):
 def preprocess_with_weights(image, label, weights):
     image = tf.clip_by_value(image, 0.0, 10.0)
     image = tf.math.asinh(image / stddev)
-    return image, label, tf.gather(weights, tf.cast(tf.math.round(label * 100), tf.dtypes.int32))
+    return image, label * 100, tf.gather(weights, tf.cast(tf.math.round(label * 100), tf.dtypes.int32))
 
 # Preprocessing function
 def preprocess(image, label):
     image = tf.clip_by_value(image, 0.0, 10.0)
     image = tf.math.asinh(image / stddev)
-    return image, label
+    return image, label * 100
 
 # Load and split the dataset into train and test set
 def prepare_data():
@@ -51,7 +53,7 @@ def prepare_data():
     dataset = dataset.batch(50)
     validation_dataset = validation_dataset.batch(100)
 
-    weights = get_weights(dataset)
+    # weights = get_weights(dataset)
 
     # dataset = dataset.map(lambda x,y: preprocess_with_weights(x, y, weights))
     dataset = dataset.map(preprocess)
@@ -88,7 +90,6 @@ class ImageRegressor(keras.Model):
 
 # Compile and train the model
 def train(model, train_data, val_data, epochs=100, file_ext=''):
-    model.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-4), loss='mse')
 
     cp_callback = keras.callbacks.ModelCheckpoint(
         filepath=f'checkpoint-sup-{file_ext}.ckpt',
@@ -98,18 +99,11 @@ def train(model, train_data, val_data, epochs=100, file_ext=''):
 
     stop_callback = keras.callbacks.EarlyStopping(patience=10)
 
-    train_history = model.fit(train_data, validation_data=val_data, epochs=epochs, callbacks=[cp_callback, stop_callback])
+    train_history = model.fit(train_data, validation_data=val_data, epochs=epochs, callbacks=[cp_callback])
 
     return model
 
-def binned_plot(dataset, Y, filename='binned_plot.png', n=10, percentiles=[35, 50], ax=None, **kwargs):
-    unbatched = dataset.unbatch()
-    
-    labels = []
-    for i, thing in enumerate(unbatched):
-        labels.append(thing[1])
-    X = np.array(labels)
-
+def make_binned_plot(X, Y, filename='binned_plot.png', n=10, percentiles=[35, 50], ax=None, **kwargs):
     # Calculation
     calc_percent = []
     for p in percentiles:
@@ -150,12 +144,6 @@ def binned_plot(dataset, Y, filename='binned_plot.png', n=10, percentiles=[35, 5
                             bin_data[str(50+p)],
                             alpha=0.2,
                             **kwargs)
-    
-    # Plot the expected line
-    ax.plot(np.linspace(bin_centers[0],bin_centers[-1],10),np.linspace(bin_centers[0],bin_centers[-1],10),'k--')
-    
-    f.savefig(fname=filename)
-    plt.close()
 
     return bin_data, bin_edges
 
@@ -181,6 +169,41 @@ def scatter_plot(dataset, predictions, filename):
     plt.savefig(filename)
     plt.close()
 
+def binned_plot(dataset, pred, filename='binned_plot.png', n=10, percentiles=[35, 50], ax=None, **kwargs):
+    unbatched = dataset.unbatch()
+    
+    labels = []
+    for i, thing in enumerate(unbatched):
+        labels.append(thing[1])
+    labels = np.array(labels)
+
+    # Plot the results
+    # f = plt.figure(figsize=(6,8))
+    # gs = mpl.gridspec.GridSpec(2,1,height_ratios=[3,1], hspace=0)
+
+    # ax1 = f.add_subplot(gs[0,0])
+    f, ax1 = plt.subplots()
+    ax1.plot(np.arange(0, max(labels), 0.001), np.arange(0, max(labels), 0.001), 'k--')
+    _ = make_binned_plot(labels, pred, n=20, percentiles=[35,45,50], color='b', ax=ax1)
+
+    ax1.set_xlim(0, max(labels))
+    ax1.set_ylim(0, max(labels))
+    # ax1.set_xticks([])
+    ax1.set_ylabel('Predicted ICL fraction')
+    ax1.set_xlabel('True ICL fractions')
+
+    # ax2 = f.add_subplot(gs[1,0])
+    # ax2.plot(np.linspace(0,max(labels),10),[0]*10,'k--')
+    # _ = make_binned_plot(labels, pred - labels, n=20, percentiles=[35,45,50], color='b', ax=ax2)
+
+    # ax2.set_xlim(0,max(labels))
+    # ax2.set_xlabel('True ICL fractions')
+    # ax2.set_ylabel('Offsets')
+
+    f.savefig(fname=filename)
+    
+    plt.close()
+
 def plot_results(model, train_data, val_data, file_ext):  
     # Create scatter plots showing the spread of data
     predictions = model.predict(train_data).squeeze()
@@ -192,6 +215,23 @@ def plot_results(model, train_data, val_data, file_ext):
     # Create binned plot
     binned_plot(val_data, predictions, percentiles=[35,45,50], color='b', filename=f'binned_plot-{file_ext}.png')
 
+def plot_loss(jobnumber):
+    f = open(f'sup_train.pbs.o{jobnumber}')
+    loss = []
+    val_loss = []
+    for line in f:
+        words = line.split(' ')
+        if 'loss:' in words:
+            loss.append(float(words[7]))
+            val_loss.append(float(words[-1]))
+    
+    plt.plot(np.arange(len(loss)), loss)
+    plt.plot(np.arange(len(val_loss)), val_loss)
+    plt.legend(['Train loss', 'Val loss'])
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.savefig('Loss graph')
+
 if __name__ == '__main__':
     if len(sys.argv) > 1:
         file_ext = sys.argv[1]
@@ -201,7 +241,8 @@ if __name__ == '__main__':
     dataset, validation_dataset = prepare_data()
 
     model = ImageRegressor((224,224,1))
-    # model.load_weights('checkpoint-sup-x100.ckpt').expect_partial()
+    model.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-5), loss='mse')
+    model.load_weights('checkpoint-sup-x100cont2.ckpt').expect_partial()
 
     model = train(model, dataset, validation_dataset, file_ext=file_ext)
 
