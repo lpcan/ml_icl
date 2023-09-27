@@ -7,7 +7,7 @@ from tensorflow import keras
 import tensorflow_datasets as tfds
 
 # Global parameters
-fracs_path = '/srv/scratch/z5214005/fracs.npy'
+fracs_path = '/srv/scratch/z5214005/precalc_fracs/fracs.npy'
 input_shape = (224,224,1)
 temperature = 0.1
 queue_size = 1000
@@ -69,7 +69,7 @@ def eval_model(checkpoint_path = 'checkpoint.ckpt'):
     for batch in validation_imgs:
         validation_imgs = augmenter(batch)
     embeddings = model.encoder(validation_imgs)
-
+    
     # Calculate the Spearman rank coefficient
     coeff = calc_spearman(embeddings)
 

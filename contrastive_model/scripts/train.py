@@ -16,7 +16,7 @@ temperature = 0.1
 queue_size = 1000
 input_shape = (224, 224, 1)
 
-num_epochs = 50
+num_epochs = 100
 num_images = 2377
 batch_size = 16
 
@@ -42,8 +42,9 @@ dataset = initial_dataset.map(preprocess)
 model = NNCLR(input_shape=input_shape, 
               temperature=temperature, 
               queue_size=queue_size)
+# model.load_weights('checkpoint-double.ckpt').expect_partial()
 model.compile(
-    contrastive_optimizer=keras.optimizers.Adam()
+    contrastive_optimizer=keras.optimizers.Adam(learning_rate=1e-3)
 )
 
 # Create a checkpoint callback

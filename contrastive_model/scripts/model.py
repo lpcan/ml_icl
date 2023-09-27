@@ -3,11 +3,13 @@ NNCLR model, adapted from https://keras.io/examples/vision/nnclr/ and
 Alice's code
 """
 
-from augmentations import augmenter
+# from augmentations import augmenter
+from double_augmenter import augmenter
 
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
+# import resnet_cifar10_v2_noreg as resnet_cifar10_v2
 import resnet_cifar10_v2
 
 N = 2
@@ -196,8 +198,9 @@ class NNCLR(keras.Model):
 
     def train_step(self, images):
         # Get the augmented images
-        augmented_images_1 = self.contrastive_augmenter(images)
-        augmented_images_2 = self.contrastive_augmenter(images)
+        # augmented_images_1 = self.contrastive_augmenter(images)
+        # augmented_images_2 = self.contrastive_augmenter(images)
+        augmented_images_1, augmented_images_2 = self.contrastive_augmenter(images)
 
         # Pass through the model and calculate the loss
         with tf.GradientTape() as tape:
@@ -232,3 +235,7 @@ class NNCLR(keras.Model):
     def predict_step(self, images):
         # Pass images through encoder and return embeddings
         return self.encoder(images)
+
+    def call(self, images):
+        x = self.encoder(images)
+        return self.projection_head(x)
