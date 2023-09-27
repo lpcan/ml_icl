@@ -1,3 +1,5 @@
+# Miscellaneous scripts that will probably never be useful again
+
 from augmentations import augmenter
 
 import matplotlib.pyplot as plt
@@ -29,7 +31,7 @@ def preprocess(data):
 
 def test_augmenter():
     # Prepare the dataset
-    initial_dataset = (tfds.load('hsc_icl', split='train', shuffle_files=True)
+    initial_dataset = (tfds.load('hsc_icl', split='train', shuffle_files=True, data_dir='/srv/scratch/z5214005/tensorflow_datasets/')
             .shuffle(buffer_size=shuffle_buffer)
             .batch(batch_size)
     )
@@ -45,14 +47,17 @@ def test_augmenter():
             aug = contrastive_augmenter(batch)[0]
             augs.append(aug)
         img = batch[0]
-        plt.figure(figsize=(4,4), dpi=150)
-        for i in range(4):
-            plt.subplot(2,2,i+1)
-            plt.imshow(tf.squeeze(augs[i]))
+        # plt.figure(figsize=(4,4), dpi=150)
+        # for i in range(4):
+        #     plt.subplot(2,2,i+1)
+        plt.imshow(tf.squeeze(augs[0]))
 
-        plt.show()
+        # plt.show()
+        plt.savefig('asdf.png')
+        plt.close()
         plt.imshow(img)
-        plt.show()
+        plt.savefig('asdf1.png')
+        # plt.show()
         break # Just show one example rather than all in the batch
 
 def mutual_information_exp():
@@ -101,3 +106,14 @@ def mutual_information_exp():
     plt.figure(figsize=(30,3), dpi=200)
     sns.heatmap(matrix, cmap='seismic', center=0, annot=False)
     plt.savefig('asdf.png')     
+
+def download_bulk(table, filename='/srv/scratch/mltidal/vd_wide.hdf', rerun='pdr2_wide'):
+    from astropy.io import ascii
+    from unagi import hsc
+    from unagi.task import hsc_bulk_cutout
+
+    # Open the table
+    table = ascii.read(table)
+
+    # Download the data
+    

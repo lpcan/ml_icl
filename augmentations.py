@@ -8,8 +8,6 @@ from tensorflow import keras
 from keras import layers
 import keras_cv
 
-import tensorflow_addons as tfa
-
 class RandomResizedCrop(layers.Layer):
     """
     Randomly crop the images and resize the image back to original size. 
@@ -118,11 +116,11 @@ class RandomRotate90(layers.Layer):
     def call(self, images):
         return tf.map_fn(tf.image.rot90, images)
 
-def augmenter(input_shape):
+def augmenter(input_shape, mean=0.948, std=1.108):
     return keras.Sequential(
         [
             layers.Input(shape=input_shape),
-            layers.Normalization(mean=0.948, variance=1.108**2),
+            layers.Normalization(mean=mean, variance=std**2),
             layers.RandomFlip(mode='horizontal_and_vertical'),
             RandomGaussianNoise(stddev=0.017359),
             RandomRotate90(),

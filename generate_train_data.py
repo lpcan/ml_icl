@@ -41,8 +41,8 @@ def get_member_locs(idx, merged, cutout_shape):
     
     return (x_locs, y_locs)
 
-cutouts = h5py.File('lrg_cutouts_resized.hdf')
-tbl = ascii.read('data/processed/lrgs_sampled.tbl')
+cutouts = h5py.File('/srv/scratch/z5214005/lrg_cutouts_resized.hdf')
+tbl = ascii.read('/srv/scratch/z5214005/lrgs_sampled.tbl')
 zs = tbl['z']
 
 # # Load the cluster member catalogue
@@ -53,7 +53,7 @@ zs = tbl['z']
 # merged = join(members, tbl, keys_left=['RA_cl', 'Dec_cl'], keys_right=['RA [deg]', 'Dec [deg]'])
 # merged = merged['ID', 'Name', 'RA_cl', 'Dec_cl', 'z_cl_1', 'RA', 'Dec']
 
-generated_data = h5py.File('generated_data.hdf', 'w')
+generated_data = h5py.File('/srv/scratch/mltidal/generated_data_wparams.hdf', 'w')
 fracs = []
 finder = SourceFinder(npixels=20, progress_bar=False)
 
@@ -116,8 +116,8 @@ for num in range(len(tbl)):
     noise = np.random.normal(loc=0, scale=std, size=cutout.shape)
 
     # Add to final image
-    # img = img_no_noise + noise
-    img = cutout + icl_img
+    img = img_no_noise + noise
+    # img = cutout + icl_img
     img = img.astype('<f4')
 
     # Calculate the new artificial ICL fraction
@@ -134,6 +134,10 @@ for num in range(len(tbl)):
     generated_data[f'{cutout_id}/FRAC'] = icl / total
     generated_data[f'{cutout_id}/ICL'] = icl
     generated_data[f'{cutout_id}/TOTAL'] = total
+    generated_data[f'{cutout_id}/PARAMS/AMP'] = amplitude
+    generated_data[f'{cutout_id}/PARAMS/ELLIP'] = ellip
+    generated_data[f'{cutout_id}/PARAMS/THETA'] = theta
+    generated_data[f'{cutout_id}/PARAMS/R_EFF'] = r_eff
     
     # plt.figure(figsize=(8,4))
     # plt.subplot(131)

@@ -70,9 +70,9 @@ def encoder(input_shape):
 
 # Define the model
 class ImageRegressor(keras.Model):
-    def __init__(self, input_shape):
+    def __init__(self, input_shape, mean=0.948, std=1.108):
         super().__init__()
-        self.augmenter = augmenter(input_shape)
+        self.augmenter = augmenter(input_shape, mean=mean, std=std)
         self.encoder = encoder(input_shape)
         self.regressor = keras.Sequential([
             layers.Input((256), name='regressor'),
@@ -106,6 +106,8 @@ def train(model, train_data, val_data, epochs=100, file_ext=''):
     stop_callback = keras.callbacks.EarlyStopping(patience=10)
 
     train_history = model.fit(train_data, validation_data=val_data, epochs=epochs, callbacks=[cp_callback])
+
+    model.save_weights(f'checkpoint-sup-{file_ext}-final.ckpt')
 
     return model
 
@@ -168,7 +170,15 @@ def binned_plot(dataset, Y, filename='binned_plot.png', n=10, percentiles=[35, 5
                             **kwargs)
     
     # Plot the expected line
-    ax.plot(np.linspace(bin_centers[0],bin_centers[-1],10),np.linspace(bin_centers[0],bin_centers[-1],10),'k--')
+    ax.plot(np.linspace(bin_centers[0],bin_centers[-1],10),np.linspace(bin_centers[0],bin_centers[-1],10),'w--')
+    from matplotlib.patches import Patch
+    from matplotlib.lines import Line2D
+    legend_elements = [Line2D([0], [0], color='C6', label='Mean prediction'),
+                       Patch(facecolor='C6', alpha=0.4,
+                         label='70th percentile'),
+                       Patch(facecolor='C6', alpha=0.2,
+                         label='90th percentile')]
+    plt.legend(handles=legend_elements)
     
     plt.xlabel('Expected fraction')
     plt.ylabel('Predicted fraction')
@@ -278,10 +288,10 @@ if __name__ == '__main__':
     model = ImageRegressor((224,224,1))
 
     negloglik = lambda y, p_y: -p_y.log_prob(y)
-    model.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-5), loss=negloglik)
+    model.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-6), loss=negloglik)
     
-    # model.load_weights('checkpoint-sup-probcont1.ckpt').expect_partial()
+    model.load_weights('checkpoint-sup-newdatacont-final.ckpt').expect_partial()
 
-    model = train(model, dataset, validation_dataset, file_ext=file_ext)
+    model = train(model, dataset, validation_dataset, epochs=100, file_ext=file_ext)
 
     plot_results(model, dataset, validation_dataset, file_ext=file_ext)
