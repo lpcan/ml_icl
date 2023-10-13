@@ -15,6 +15,7 @@ from photutils.background import Background2D
 import scipy
 from scipy import spatial
 from scipy.interpolate import CloughTocher2DInterpolator
+from skimage.morphology import binary_closing
 import sys
 import tqdm
 import warnings
@@ -47,6 +48,10 @@ def background_estimate(cutout, z, cosmo, mask=None):
     px_dist = cosmo.arcsec_per_kpc_proper(z) * 350 * 1/0.168
     size = int(np.ceil(px_dist.value / box_size))
     box = (X > x_cen - size) & (X < x_cen + size) & (Y > y_cen - size) & (Y < y_cen + size)
+
+    if np.count_nonzero(box == False) == 0:
+        # Image is completely covered, just use the edges
+        box = (X < mesh.shape[1] - 1) & (X > 0) & (Y < mesh.shape[0] - 1) & (Y > 0)
 
     # Get values from the mesh corresponding to these coordinates
     vals = mesh[~box]
@@ -283,8 +288,9 @@ def calc_icl_frac(args):
         sb_img[sb_img >= sb_lim] = np.nan
 
         # Mask above the surface brightness threshold
-        threshold = 25 + 10 * np.log10(1 + zs[int(key)])
+        threshold = 26 + 10 * np.log10(1 + zs[int(key)])
         mask = sb_img > threshold
+        mask = binary_closing(mask)
 
         # Convert the SB image back to counts
         counts_img = sb2counts(sb_img)
@@ -383,5 +389,5 @@ if __name__ == '__main__':
     print(list(zip(top_5, fracs[2][top_5])))
     print(list(zip(bottom_5, fracs[2][bottom_5])))
 
-    np.save('/srv/scratch/z5214005/bcgicl_fracs.npy', fracs) 
-    np.save('/srv/scratch/z5214005/bcgicl_masks.npy', masks)
+    np.save('/srv/scratch/mltidal/fracs_new.npy', fracs) 
+    # np.save('/srv/scratch/z5214005/masks.npy', masks)

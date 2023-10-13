@@ -7,9 +7,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import scipy
 from skimage.morphology import binary_opening
+import skimage
 
 from photutils.segmentation import SourceFinder
-from astropy.stats import sigma_clipped_stats
+from astropy.stats import sigma_clipped_stats, mad_std
 
 # Convenience function for plotting the images
 stddev = 0.017359
@@ -53,9 +54,9 @@ zs = tbl['z']
 # merged = join(members, tbl, keys_left=['RA_cl', 'Dec_cl'], keys_right=['RA [deg]', 'Dec [deg]'])
 # merged = merged['ID', 'Name', 'RA_cl', 'Dec_cl', 'z_cl_1', 'RA', 'Dec']
 
-generated_data = h5py.File('/srv/scratch/mltidal/generated_data_wparams.hdf', 'w')
+generated_data = h5py.File('/srv/scratch/mltidal/generated_data_experiment.hdf', 'w')
 fracs = []
-finder = SourceFinder(npixels=20, progress_bar=False)
+finder = SourceFinder(npixels=20, progress_bar=False, nlevels=8)
 
 for num in range(len(tbl)):
     print(f'{num}', end='\r')
@@ -74,10 +75,6 @@ for num in range(len(tbl)):
     central_blob = bright_parts * (labels == labels[centre[0], centre[1]])
     if np.sum(central_blob) == 0:
         continue
-    edges = scipy.spatial.ConvexHull(np.argwhere(central_blob)) # Convex hull of central blob
-
-    distances = scipy.spatial.distance.cdist([centre], np.argwhere(central_blob)[edges.vertices])[0] # Distances to edges of shape
-    r_eff = np.random.choice(distances) # Vague estimate of size of central blob
 
     # # Find the cluster members in the image
     # x_locs, y_locs = get_member_locs(num, merged, cutout.shape)
@@ -95,39 +92,58 @@ for num in range(len(tbl)):
 
     final_bright_parts = non_central_blurred + central_blob
 
-    # Generate some random parameters for the profile
-    amplitude = threshold
-    n = 1 # exponential profile
-    ellip = np.random.uniform(low=0, high=0.5)
-    theta = np.random.uniform(low=0, high=2*np.pi)
+    # Figure out what r_eff of the profile should be
+    opened_blob = binary_opening(central_blob, np.ones((2,2)))
+    labelled_blob = skimage.measure.label(opened_blob)
+    opened_blob = opened_blob * (labelled_blob == labelled_blob[centre[0], centre[1]])
 
-    # Generate the model
-    model = Sersic2D(amplitude=amplitude, r_eff=r_eff, n=n, x_0=centre[1], y_0=centre[0], ellip=ellip, theta=theta)
-    x,y = np.meshgrid(np.arange(cutout.shape[1]), np.arange(cutout.shape[0]))
+    edges = scipy.spatial.ConvexHull(np.argwhere(opened_blob)) # Convex hull of central blob
 
-    icl_img = np.clip(model(x,y), a_min=None, a_max=threshold)
-    icl_img = np.where(central_blob, 0, icl_img)
+    distances = scipy.spatial.distance.cdist([centre], np.argwhere(opened_blob)[edges.vertices])[0] # Distances to edges of shape
+    
+    quantile = 1
+    size_frac = 10
+    
+    # Try with these parameters, but for very irregularly shaped galaxies, r_eff
+    # may need to be more conservative
+    while size_frac > 8 and quantile >= 0:
+        r_eff = np.quantile(distances, quantile)
 
+        # Generate some random parameters for the profile
+        amplitude = threshold
+        n = 1 # exponential profile
+        ellip = np.random.uniform(low=0, high=0.5)
+        theta = np.random.uniform(low=0, high=2*np.pi)
+
+        # Generate the model
+        model = Sersic2D(amplitude=amplitude, r_eff=r_eff, n=n, x_0=centre[1], y_0=centre[0], ellip=ellip, theta=theta)
+        x,y = np.meshgrid(np.arange(cutout.shape[1]), np.arange(cutout.shape[0]))
+
+        icl_img = np.clip(model(x,y), a_min=None, a_max=threshold)
+        icl_img = np.where(central_blob, 0, icl_img)
+
+        # Calculate the new artificial ICL fraction
+        sb_limit = 28 + 10 * np.log10(1+z) # Calculate the sb limit
+        limit = 10**(-0.4*(sb_limit - 2.5*np.log10(63095734448.0194) - 5.*np.log10(0.168))) # Convert to counts
+        icl = np.sum(icl_img[icl_img > limit])
+
+        _, med, _ = sigma_clipped_stats(cutout)
+        total = np.sum(((np.array(cutout) - med) * central_blob) + icl_img)
+        
+        size_frac = (np.sum(icl_img > limit) / np.sum(central_blob))
+        quantile -= 0.25
+    
+    # Generate the final image
     # Add to the bright parts
-    img_no_noise = (cutout * final_bright_parts) + icl_img #np.clip(model(x,y), a_min=None, a_max=threshold)
+    img_no_noise = (cutout * final_bright_parts) + icl_img
 
     # Generate some noise
-    std = np.std(cutout * ~bright_parts) # Standard deviation of the background (+icl)
+    std = mad_std(cutout * ~bright_parts) # Standard deviation of the background (+icl)
     noise = np.random.normal(loc=0, scale=std, size=cutout.shape)
 
     # Add to final image
     img = img_no_noise + noise
-    # img = cutout + icl_img
     img = img.astype('<f4')
-
-    # Calculate the new artificial ICL fraction
-    sb_limit = 28 + 10 * np.log10(1+z) # Calculate the sb limit
-    limit = 10**(-0.4*(sb_limit - 2.5*np.log10(63095734448.0194) - 5.*np.log10(0.168))) # Convert to counts
-    icl = np.sum(icl_img[icl_img > limit])
-
-    # total = np.sum(img_no_noise) # Total brightness (without considering noise)
-    _, med, _ = sigma_clipped_stats(cutout)
-    total = np.sum(((np.array(cutout) - med) * member_mask) + icl_img)
 
     # Add to file
     generated_data[f'{cutout_id}/HDU0/DATA'] = img
@@ -139,20 +155,27 @@ for num in range(len(tbl)):
     generated_data[f'{cutout_id}/PARAMS/THETA'] = theta
     generated_data[f'{cutout_id}/PARAMS/R_EFF'] = r_eff
     
-    # plt.figure(figsize=(8,4))
-    # plt.subplot(131)
-    # plt.imshow(stretch(icl_img))
-    # plt.subplot(132)
-    # plt.imshow(stretch((cutout * member_mask) + icl_img))
-    # plt.subplot(133)
+    # plt.figure(figsize=(16,4))
+    # plt.subplot(141)
+    # plt.imshow(stretch(cutout))
+    # plt.xticks([])
+    # plt.yticks([])
+    # plt.title('Original image')
+    # plt.subplot(142)
+    # plt.imshow(stretch((cutout * bright_parts)))
+    # plt.xticks([])
+    # plt.yticks([])
+    # plt.title('Thresholded image')
+    # plt.subplot(143)
+    # plt.imshow(stretch(img_no_noise))
+    # plt.xticks([])
+    # plt.yticks([])
+    # plt.title('Added ICL profile')
+    # plt.subplot(144)
     # plt.imshow(stretch(img))
-    # plt.suptitle(str(icl / total))
-    # plt.show()
-
-    fracs.append(icl / total)
-
-plt.hist(fracs, 15)
-# plt.xlim(0,0.3)
-plt.xlabel('ICL fraction')
-plt.ylabel('Counts')
-plt.show()
+    # plt.xticks([])
+    # plt.yticks([])
+    # plt.title('Final image')
+    # # plt.suptitle(str(icl / total))
+    # plt.savefig('asdf.png')
+    
