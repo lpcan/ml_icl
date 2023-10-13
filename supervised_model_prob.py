@@ -45,7 +45,7 @@ def preprocess(image, label):
 
 # Load and split the dataset into train and test set
 def prepare_data():
-    ds = (tfds.load('supervised_data_1', split='train', data_dir='/srv/scratch/mltidal/tensorflow_datasets', as_supervised=True)
+    ds = (tfds.load('supervised_data', split='train', data_dir='/srv/scratch/mltidal/tensorflow_datasets', as_supervised=True)
     )
 
     dataset, validation_dataset = keras.utils.split_dataset(ds, left_size=0.9, right_size=0.1, shuffle=False)
@@ -119,6 +119,8 @@ def binned_plot(dataset, Y, filename='binned_plot.png', n=10, percentiles=[35, 5
         labels.append(thing[1])
     X = np.array(labels)
 
+    print(f'MAE = {np.mean(np.abs(X-Y))}')
+
     # Calculation
     calc_percent = []
     for p in percentiles:
@@ -170,13 +172,13 @@ def binned_plot(dataset, Y, filename='binned_plot.png', n=10, percentiles=[35, 5
                             **kwargs)
     
     # Plot the expected line
-    ax.plot(np.linspace(bin_centers[0],bin_centers[-1],10),np.linspace(bin_centers[0],bin_centers[-1],10),'w--')
+    ax.plot(np.linspace(bin_centers[0],bin_centers[-1],10),np.linspace(bin_centers[0],bin_centers[-1],10),'k--')
     from matplotlib.patches import Patch
     from matplotlib.lines import Line2D
-    legend_elements = [Line2D([0], [0], color='C6', label='Mean prediction'),
-                       Patch(facecolor='C6', alpha=0.4,
+    legend_elements = [Line2D([0], [0], color='b', label='Mean prediction'),
+                       Patch(facecolor='b', alpha=0.4,
                          label='70th percentile'),
-                       Patch(facecolor='C6', alpha=0.2,
+                       Patch(facecolor='b', alpha=0.2,
                          label='90th percentile')]
     plt.legend(handles=legend_elements)
     
@@ -212,7 +214,7 @@ def scatter_plot(dataset, predictions, filename):
 
 def plot_results(model, train_data, val_data, file_ext):
     train_subset = train_data.take(20)
-    val_subset = val_data.take(10) 
+    val_subset = val_data#.take(10) 
     # Create scatter plots showing the spread of data
     predictions = []
     for batch in train_subset:
@@ -288,9 +290,9 @@ if __name__ == '__main__':
     model = ImageRegressor((224,224,1))
 
     negloglik = lambda y, p_y: -p_y.log_prob(y)
-    model.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-6), loss=negloglik)
+    model.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-5), loss=negloglik)
     
-    model.load_weights('checkpoint-sup-newdatacont-final.ckpt').expect_partial()
+    model.load_weights('checkpoint-sup-expdatacont1-final.ckpt').expect_partial()
 
     model = train(model, dataset, validation_dataset, epochs=100, file_ext=file_ext)
 

@@ -9,7 +9,7 @@ import skimage
 from supervised_model_prob import ImageRegressor
 
 # Instantiate the model
-model_checkpoint = 'checkpoint-sup-newdata.ckpt'
+model_checkpoint = 'checkpoint-sup-expdatacont2-final.ckpt'
 model = ImageRegressor((224,224,1))
 negloglik = lambda y, p_y: -p_y.log_prob(y)
 model.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-5), loss=negloglik)
@@ -51,13 +51,17 @@ for bcg in cutouts.keys():
 
 # Create a histogram showing both of these distributions
 plt.subplot(211)
-_, bins, _ = plt.hist(lrg_predictions)
+_, bins, _ = plt.hist(lrg_predictions, facecolor='b', alpha=0.5, edgecolor='b')
 # plt.yscale('log')
 plt.title('ICL predictions for LRGs')
+plt.xlabel('ICL fraction')
+plt.ylabel('Count')
 plt.subplot(212)
-plt.hist(bcg_predictions, bins=bins)
+plt.hist(bcg_predictions, bins=bins, facecolor='b', alpha=0.5, edgecolor='b')
 # plt.yscale('log')
 plt.title('ICL predictions for BCGs')
+plt.xlabel('ICL fraction')
+plt.ylabel('Count')
 plt.tight_layout()
 plt.savefig('asdf.png')
 plt.close()
