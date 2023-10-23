@@ -5,7 +5,6 @@ import tensorflow_datasets as tfds
 import tensorflow_probability as tfp
 import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib as mpl
 import sys
 
 import resnet_cifar10_v2
@@ -17,45 +16,21 @@ NUM_BLOCKS = ((DEPTH - 2) // 9) - 1
 stddev = 0.017359
 num_components = 16
 
-# Idk where to put this for now
-from scipy.stats import gaussian_kde
-def get_weights(dataset):
-    dataset = dataset.unbatch()
-    fracs = []
-    for element in dataset:
-        fracs.append(element[1])
-    kernel = gaussian_kde(fracs)
-    pts = np.arange(0, max(fracs), 0.01)
-    probs = kernel(pts)
-    weights = 1/probs
-    weights = tf.clip_by_value(weights, 1, 5)
-
-    return tf.convert_to_tensor(weights)
-
-# Preprocessing function with weights
-def preprocess_with_weights(image, label, weights):
-    image = tf.clip_by_value(image, 0.0, 10.0)
-    image = tf.math.asinh(image / stddev)
-    return image, label * 100, tf.gather(weights, tf.cast(tf.math.round(label * 100), tf.dtypes.int32))
-
 # Preprocessing function
 def preprocess(image, label):
     image = tf.clip_by_value(image, 0.0, 10.0)
     image = tf.math.asinh(image / stddev)
-    return image, label * 100
+    return image, label
 
 # Load and split the dataset into train and test set
 def prepare_data():
-    ds = (tfds.load('supervised_data', split='train', data_dir='/srv/scratch/z5214005/tensorflow_datasets', as_supervised=True)
+    ds = (tfds.load('supervised_data', split='train', data_dir='/srv/scratch/mltidal/tensorflow_datasets', as_supervised=True)
     )
 
     dataset, validation_dataset = keras.utils.split_dataset(ds, left_size=0.9, right_size=0.1, shuffle=False)
     dataset = dataset.batch(50)
     validation_dataset = validation_dataset.batch(100)
 
-    # weights = get_weights(dataset)
-
-    # dataset = dataset.map(lambda x,y: preprocess_with_weights(x, y, weights))
     dataset = dataset.map(preprocess)
     validation_dataset = validation_dataset.map(preprocess)
     
@@ -71,26 +46,33 @@ def encoder(input_shape):
 
 # Define the model
 class ImageRegressor(keras.Model):
-    def __init__(self, input_shape):
+    def __init__(self, input_shape, mean=0.948, std=1.108):
         super().__init__()
-        self.augmenter = augmenter(input_shape)
+        self.augmenter = augmenter(input_shape, mean=mean, std=std)
         self.encoder = encoder(input_shape)
         self.regressor = keras.Sequential([
             layers.Input((256), name='regressor'),
             layers.Dense(2048, activation='relu'),
-            layers.Dense(256, activation='relu'),
-            layers.Dense(1)
+            # layers.Dense(256, activation='relu'),
+            # layers.Dense(1)
+        ])
+        self.prob_output = keras.Sequential([
+            layers.Dense(units=num_components*3),
+            tfp.layers.DistributionLambda(lambda t: tfp.distributions.Independent(
+                tfp.distributions.MixtureSameFamily(mixture_distribution=tfp.distributions.Categorical(logits=tf.expand_dims(t[..., :num_components], -2)),
+                                                    components_distribution=tfp.distributions.Beta(1 + tf.nn.softplus(tf.expand_dims(t[..., num_components:2*num_components], -2)),
+                                                                                                   1 + tf.nn.softplus(tf.expand_dims(t[..., 2*num_components:],-2)))), 1))
         ])
 
     def call(self, inputs):
         x = self.augmenter(inputs) 
         x = self.encoder(x)
-        outputs = self.regressor(x)
+        x = self.regressor(x)
+        outputs = self.prob_output(x)
         return outputs
 
 # Compile and train the model
 def train(model, train_data, val_data, epochs=100, file_ext=''):
-
     cp_callback = keras.callbacks.ModelCheckpoint(
         filepath=f'checkpoint-sup-{file_ext}.ckpt',
         save_best_only=True,
@@ -101,9 +83,21 @@ def train(model, train_data, val_data, epochs=100, file_ext=''):
 
     train_history = model.fit(train_data, validation_data=val_data, epochs=epochs, callbacks=[cp_callback])
 
+    model.save_weights(f'checkpoint-sup-{file_ext}-final.ckpt')
+
     return model
 
-def make_binned_plot(X, Y, filename='binned_plot.png', n=10, percentiles=[35, 50], ax=None, **kwargs):
+# Results plotting - code mostly from Francois
+def binned_plot(dataset, Y, filename='binned_plot.png', n=10, percentiles=[35, 50], ax=None, **kwargs):
+    unbatched = dataset.unbatch()
+    
+    labels = []
+    for i, thing in enumerate(unbatched):
+        labels.append(thing[1])
+    X = np.array(labels)
+
+    print(f'MAE = {np.mean(np.abs(X-Y))}')
+
     # Calculation
     calc_percent = []
     for p in percentiles:
@@ -120,10 +114,13 @@ def make_binned_plot(X, Y, filename='binned_plot.png', n=10, percentiles=[35, 50
     dtype = [(str(i), 'f') for i in calc_percent]
     bin_data = np.zeros(shape=(n,), dtype=dtype)
 
+    empty_bins = []
+
     for i in range(n):
         y = Y[(X >= bin_edges[i]) & (X < bin_edges[i+1])]
 
         if len(y) == 0:
+            empty_bins.append(i)
             continue
 
         y_p = np.percentile(y, calc_percent)
@@ -135,6 +132,12 @@ def make_binned_plot(X, Y, filename='binned_plot.png', n=10, percentiles=[35, 50
         f, ax = plt.subplots()
 
     bin_centers = [np.mean(bin_edges[i:i+2]) for i in range(n)]
+
+    # Remove empty bins
+    bin_data = np.delete(bin_data, empty_bins, 0)
+    for bin_num in empty_bins[::-1]: # in reverse order so indices are still valid
+        bin_centers.pop(bin_num)
+
     for p in percentiles:
         if p == 50:
             ax.plot(bin_centers, bin_data[str(p)], **kwargs)
@@ -144,6 +147,23 @@ def make_binned_plot(X, Y, filename='binned_plot.png', n=10, percentiles=[35, 50
                             bin_data[str(50+p)],
                             alpha=0.2,
                             **kwargs)
+    
+    # Plot the expected line
+    ax.plot(np.linspace(bin_centers[0],bin_centers[-1],10),np.linspace(bin_centers[0],bin_centers[-1],10),'k--')
+    from matplotlib.patches import Patch
+    from matplotlib.lines import Line2D
+    legend_elements = [Line2D([0], [0], color='b', label='Mean prediction'),
+                       Patch(facecolor='b', alpha=0.4,
+                         label='70th percentile'),
+                       Patch(facecolor='b', alpha=0.2,
+                         label='90th percentile')]
+    plt.legend(handles=legend_elements)
+    
+    plt.xlabel('Expected fraction')
+    plt.ylabel('Predicted fraction')
+    f.savefig(fname=filename)
+    
+    plt.close()
 
     return bin_data, bin_edges
 
@@ -169,51 +189,54 @@ def scatter_plot(dataset, predictions, filename):
     plt.savefig(filename)
     plt.close()
 
-def binned_plot(dataset, pred, filename='binned_plot.png', n=10, percentiles=[35, 50], ax=None, **kwargs):
-    unbatched = dataset.unbatch()
-    
-    labels = []
-    for i, thing in enumerate(unbatched):
-        labels.append(thing[1])
-    labels = np.array(labels)
-
-    # Plot the results
-    # f = plt.figure(figsize=(6,8))
-    # gs = mpl.gridspec.GridSpec(2,1,height_ratios=[3,1], hspace=0)
-
-    # ax1 = f.add_subplot(gs[0,0])
-    f, ax1 = plt.subplots()
-    ax1.plot(np.arange(0, max(labels), 0.001), np.arange(0, max(labels), 0.001), 'k--')
-    _ = make_binned_plot(labels, pred, n=20, percentiles=[35,45,50], color='b', ax=ax1)
-
-    ax1.set_xlim(0, max(labels))
-    ax1.set_ylim(0, max(labels))
-    # ax1.set_xticks([])
-    ax1.set_ylabel('Predicted ICL fraction')
-    ax1.set_xlabel('True ICL fractions')
-
-    # ax2 = f.add_subplot(gs[1,0])
-    # ax2.plot(np.linspace(0,max(labels),10),[0]*10,'k--')
-    # _ = make_binned_plot(labels, pred - labels, n=20, percentiles=[35,45,50], color='b', ax=ax2)
-
-    # ax2.set_xlim(0,max(labels))
-    # ax2.set_xlabel('True ICL fractions')
-    # ax2.set_ylabel('Offsets')
-
-    f.savefig(fname=filename)
-    
-    plt.close()
-
-def plot_results(model, train_data, val_data, file_ext):  
+def plot_results(model, train_data, val_data, file_ext):
+    train_subset = train_data.take(20)
+    val_subset = val_data#.take(10) 
     # Create scatter plots showing the spread of data
-    predictions = model.predict(train_data).squeeze()
-    scatter_plot(train_data, predictions[:1000], f'train_graph-{file_ext}.png')
+    predictions = []
+    for batch in train_subset:
+        predictions.append(model(batch[0]).mean().numpy().squeeze())
+    predictions = np.array(predictions).flatten()
+    scatter_plot(train_subset, predictions, f'train_graph-{file_ext}.png')
     
-    predictions = model.predict(val_data).squeeze()
-    scatter_plot(val_data, predictions[:1000], f'val_graph-{file_ext}.png')
+    predictions = []
+    for batch in val_subset:
+        predictions.append(model(batch[0]).mean().numpy().squeeze())
+    predictions = np.array(predictions).flatten()
+    scatter_plot(val_subset, predictions, f'val_graph-{file_ext}.png')
 
     # Create binned plot
-    binned_plot(val_data, predictions, percentiles=[35,45,50], color='b', filename=f'binned_plot-{file_ext}.png')
+    binned_plot(val_subset, predictions, n=20, percentiles=[35,45,50], color='b', filename=f'binned_plot-{file_ext}.png')
+
+def plot_results_mode(model, train_data, val_data, file_ext):
+    train_subset = train_data.take(20)
+    val_subset = val_data.take(10) 
+    # Create scatter plots showing the spread of data
+    x = np.arange(0, 1, 0.001)
+    predictions = []
+    for batch in train_subset:
+        outputs = model(batch[0])
+        logps = []
+        for i in x:
+            logps.append(outputs.log_prob(i).numpy())
+        logps = np.stack(logps)
+        predictions.append(x[np.exp(logps).argmax(axis=0)])
+    predictions = np.array(predictions).flatten()
+    scatter_plot(train_subset, predictions, f'train_graph-{file_ext}.png')
+    
+    predictions = []
+    for batch in val_subset:
+        outputs = model(batch[0])
+        logps = []
+        for i in x:
+            logps.append(outputs.log_prob(i).numpy())
+        logps = np.stack(logps)
+        predictions.append(x[np.exp(logps).argmax(axis=0)])
+    predictions = np.array(predictions).flatten()
+    scatter_plot(val_subset, predictions, f'val_graph-{file_ext}.png')
+
+    # Create binned plot
+    binned_plot(val_subset, predictions, n=20, percentiles=[35,45,50], color='b', filename=f'binned_plot-{file_ext}.png')
 
 def plot_loss(jobnumber):
     f = open(f'sup_train.pbs.o{jobnumber}')
@@ -231,6 +254,7 @@ def plot_loss(jobnumber):
     plt.xlabel('Epoch')
     plt.ylabel('Loss')
     plt.savefig('Loss graph')
+    plt.close()
 
 if __name__ == '__main__':
     if len(sys.argv) > 1:
@@ -241,9 +265,12 @@ if __name__ == '__main__':
     dataset, validation_dataset = prepare_data()
 
     model = ImageRegressor((224,224,1))
-    model.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-5), loss='mse')
-    model.load_weights('checkpoint-sup-x100cont2.ckpt').expect_partial()
 
-    model = train(model, dataset, validation_dataset, file_ext=file_ext)
+    negloglik = lambda y, p_y: -p_y.log_prob(y)
+    model.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-5), loss=negloglik)
+    
+    # model.load_weights('checkpoint-sup-expdata-final.ckpt').expect_partial()
+
+    model = train(model, dataset, validation_dataset, epochs=100, file_ext=file_ext)
 
     plot_results(model, dataset, validation_dataset, file_ext=file_ext)

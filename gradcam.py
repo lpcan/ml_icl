@@ -9,7 +9,7 @@ import h5py
 import skimage
 from astropy.io import ascii
 
-from supervised_model_prob import ImageRegressor
+from supervised_model import ImageRegressor
     
 def make_gradcam_heatmap(img, model, last_conv_layer_name='conv2d_187'):
     # First, we create a model that maps the input image to the activations
