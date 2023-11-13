@@ -232,8 +232,10 @@ def calc_icl_frac(args):
         hot_mask = enlarge_mask(hot_labels, sigma=1)
 
         # Mark the cluster members in the cold mask
-        x_locs, y_locs = get_member_locs(int(key), merged, cutout.shape)
-        c_members = cold_labels[y_locs.astype(int), x_locs.astype(int)]
+        # x_locs, y_locs = get_member_locs(int(key), merged, cutout.shape)
+        # c_members = cold_labels[y_locs.astype(int), x_locs.astype(int)]
+        mid = (cutout.shape[0] // 2, cutout.shape[1] // 2)
+        c_members = cold_labels[mid[0], mid[1]]
 
         # Mask out non cluster members
         member_mask = np.isin(cold_labels, c_members) | (cold_labels == 0)
@@ -295,12 +297,17 @@ def calc_icl_frac(args):
         # Convert the SB image back to counts
         counts_img = sb2counts(sb_img)
 
+        # Close the nans to try and get rid of the noise that contributes to the ICL?
+        nans = np.isnan(counts_img)
+        nans = binary_closing(nans)
+        not_nans = ~nans
+
         masked_img = counts_img * ~bad_mask * member_mask * circ_mask
 
         # Save the mask
-        l = np.max((np.min(np.nonzero(circ_mask)), 0))
-        h = np.min((np.max(np.nonzero(circ_mask)), np.min(cutout.shape)-1))
-        masks[key,0:h-l,0:h-l] = (cutout * ~bad_mask * member_mask * circ_mask * mask)[l:h,l:h]
+        # l = np.max((np.min(np.nonzero(circ_mask)), 0))
+        # h = np.min((np.max(np.nonzero(circ_mask)), np.min(cutout.shape)-1))
+        # masks[key,0:h-l,0:h-l] = (cutout * ~bad_mask * member_mask * circ_mask * mask)[l:h,l:h]
 
         fracs[0,key] = np.nansum(masked_img * mask)
         fracs[1,key] = np.nansum(masked_img)
@@ -389,5 +396,5 @@ if __name__ == '__main__':
     print(list(zip(top_5, fracs[2][top_5])))
     print(list(zip(bottom_5, fracs[2][bottom_5])))
 
-    np.save('/srv/scratch/mltidal/fracs_new.npy', fracs) 
+    np.save('/srv/scratch/mltidal/fracs_central_only_26.npy', fracs) 
     # np.save('/srv/scratch/z5214005/masks.npy', masks)
