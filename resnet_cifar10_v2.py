@@ -29,8 +29,8 @@ def stem(inputs):
         inputs : the input vector
     '''
     x = Conv2D(16, (3, 3), strides=(1, 1), padding='same', 
-    		use_bias=False, kernel_regularizer=l2(0.0005))(inputs)
-    x = BatchNormalization(gamma_regularizer=l2(0.0005), beta_regularizer=l2(0.0005))(x)
+    		use_bias=False, kernel_regularizer=l2(0))(inputs)
+    x = BatchNormalization(gamma_regularizer=l2(0), beta_regularizer=l2(0))(x)
     x = ReLU()(x)
     return x
     
@@ -80,23 +80,23 @@ def identity_block(x, n_filters, n=2):
     ## Construct the 1x1, 3x3, 1x1 residual block (fig 3c)
 
     # Dimensionality reduction
-    x = BatchNormalization(gamma_regularizer=l2(0.0005), beta_regularizer=l2(0.0005))(x)
+    x = BatchNormalization(gamma_regularizer=l2(0), beta_regularizer=l2(0))(x)
     x = ReLU()(x)
     x = Conv2D(n_filters, (1, 1), strides=(1, 1), use_bias=False, 
-    	kernel_regularizer=l2(0.0005))(x)
+    	kernel_regularizer=l2(0))(x)
 
     # Bottleneck layer
-    x = BatchNormalization(gamma_regularizer=l2(0.0005), beta_regularizer=l2(0.0005))(x)
+    x = BatchNormalization(gamma_regularizer=l2(0), beta_regularizer=l2(0))(x)
     x = ReLU()(x)
     x = Conv2D(n_filters, (3, 3), strides=(1, 1), padding="same", 
-    	use_bias=False, kernel_regularizer=l2(0.0005))(x)
+    	use_bias=False, kernel_regularizer=l2(0))(x)
 
     # Dimensionality restoration - increase the number of output filters by 2X or 4X
-    x = BatchNormalization(gamma_regularizer=l2(0.0005), beta_regularizer=l2(0.0005), 
+    x = BatchNormalization(gamma_regularizer=l2(0), beta_regularizer=l2(0), 
     	gamma_initializer="zeros")(x)
     x = ReLU()(x)
     x = Conv2D(n_filters * n, (1, 1), strides=(1, 1), 
-    	use_bias=False, kernel_regularizer=l2(0.0005))(x)
+    	use_bias=False, kernel_regularizer=l2(0))(x)
 
     # Add the identity link (input) to the output of the residual block
     x = Add()([x, shortcut])
@@ -113,25 +113,25 @@ def projection_block(x, n_filters, strides=(2,2), n=2):
     # Construct the projection shortcut
     # Increase filters by 2X (or 4X) to match shape when added to output of block
     shortcut = Conv2D(n_filters * n, (1, 1), strides=strides, 
-    	use_bias=False, kernel_regularizer=l2(0.0005))(x)
+    	use_bias=False, kernel_regularizer=l2(0))(x)
 
     ## Construct the 1x1, 3x3, 1x1 convolution block
 
     # Dimensionality reduction
-    x = BatchNormalization(gamma_regularizer=l2(0.0005), beta_regularizer=l2(0.0005))(x)
+    x = BatchNormalization(gamma_regularizer=l2(0), beta_regularizer=l2(0))(x)
     x = ReLU()(x)
-    x = Conv2D(n_filters, (1, 1), strides=(1,1), use_bias=False, kernel_regularizer=l2(0.0005))(x)
+    x = Conv2D(n_filters, (1, 1), strides=(1,1), use_bias=False, kernel_regularizer=l2(0))(x)
     
     # Bottleneck layer - feature pooling when strides=(2, 2)
-    x = BatchNormalization(gamma_regularizer=l2(0.0005), beta_regularizer=l2(0.0005))(x)
+    x = BatchNormalization(gamma_regularizer=l2(0), beta_regularizer=l2(0))(x)
     x = ReLU()(x)  
     x = Conv2D(n_filters, (3, 3), strides=strides, padding='same', 
-    	use_bias=False, kernel_regularizer=l2(0.0005))(x)
+    	use_bias=False, kernel_regularizer=l2(0))(x)
     
     # Dimensionality restoration - increase the number of filters by 2X (or 4X)
-    x = BatchNormalization(gamma_regularizer=l2(0.0005), beta_regularizer=l2(0.0005))(x)
+    x = BatchNormalization(gamma_regularizer=l2(0), beta_regularizer=l2(0))(x)
     x = ReLU()(x)
-    x = Conv2D(n_filters * n, (1, 1), strides=(1, 1), use_bias=False, kernel_regularizer=l2(0.0005))(x)
+    x = Conv2D(n_filters * n, (1, 1), strides=(1, 1), use_bias=False, kernel_regularizer=l2(0))(x)
 
     # Add the projection shortcut to the output of the residual block
     x = Add()([shortcut, x])
