@@ -1,3 +1,4 @@
+
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
@@ -5,6 +6,7 @@ import tensorflow_datasets as tfds
 import tensorflow_probability as tfp
 import numpy as np
 import matplotlib.pyplot as plt
+from scipy.stats import pearsonr
 import sys
 
 import resnet_cifar10_v2
@@ -20,17 +22,42 @@ num_components = 16
 def preprocess(image, label):
     image = tf.clip_by_value(image, 0.0, 10.0)
     image = tf.math.asinh(image / stddev)
+    label = label / 1855 # normalise the value between 0 and 1
     return image, label
+
+from scipy.stats import gaussian_kde
+def get_weights(dataset):
+    dataset = dataset.unbatch()
+    fracs = []
+    for element in dataset:
+        fracs.append(element[1])
+    kernel = gaussian_kde(fracs)
+    pts = np.arange(0, np.round(max(fracs), 2), 0.01)
+    probs = kernel(pts)
+    weights = 1/probs
+    # Squash the weights between 1 and 10
+    # weights = ((weights - tf.math.reduce_min(weights)) / (tf.math.reduce_max(weights) - tf.math.reduce_min(weights)) * 19) + 1
+    # Clip weights between 1 and 10, then stretch to between 1 and 19. 
+    weights = tf.clip_by_value(weights, 1, 10) * 5 - 1
+    return tf.convert_to_tensor(weights)
+
+# Preprocessing function with weights
+def preprocess_with_weights(image, label, weights):
+    image = tf.clip_by_value(image, 0.0, 10.0)
+    image = tf.math.asinh(image / stddev)
+    return image, label, tf.gather(weights, tf.cast(tf.math.round(label * 100), tf.dtypes.int32))
 
 # Load and split the dataset into train and test set
 def prepare_data():
-    ds = (tfds.load('supervised_data', split='train', data_dir='/srv/scratch/mltidal/tensorflow_datasets', as_supervised=True)
+    ds = (tfds.load('supervised_data_1', split='train', data_dir='/srv/scratch/mltidal/tensorflow_datasets', as_supervised=True)
     )
 
     dataset, validation_dataset = keras.utils.split_dataset(ds, left_size=0.9, right_size=0.1, shuffle=False)
     dataset = dataset.batch(50)
     validation_dataset = validation_dataset.batch(100)
-
+    # weights = get_weights(dataset)
+    # dataset = dataset.map(lambda x,y: preprocess_with_weights(x, y, weights))
+    # validation_dataset = validation_dataset.map(lambda x,y: preprocess_with_weights(x, y, weights))
     dataset = dataset.map(preprocess)
     validation_dataset = validation_dataset.map(preprocess)
     
@@ -55,7 +82,7 @@ class ImageRegressor(keras.Model):
             layers.Dense(2048, activation='relu'),
             # layers.Dense(256, activation='relu'),
             # layers.Dense(1)
-        ])
+        ]) 
         self.prob_output = keras.Sequential([
             layers.Dense(units=num_components*3),
             tfp.layers.DistributionLambda(lambda t: tfp.distributions.Independent(
@@ -70,7 +97,7 @@ class ImageRegressor(keras.Model):
         x = self.regressor(x)
         outputs = self.prob_output(x)
         return outputs
-
+    
 # Compile and train the model
 def train(model, train_data, val_data, epochs=100, file_ext=''):
     cp_callback = keras.callbacks.ModelCheckpoint(
@@ -78,11 +105,9 @@ def train(model, train_data, val_data, epochs=100, file_ext=''):
         save_best_only=True,
         save_weights_only=True
     )
-
-    stop_callback = keras.callbacks.EarlyStopping(patience=10)
-
-    train_history = model.fit(train_data, validation_data=val_data, epochs=epochs, callbacks=[cp_callback])
-
+    stop_callback = keras.callbacks.EarlyStopping(monitor='val_loss', patience=25)
+    lr_callback = keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.1, patience=20, verbose=1, min_lr=1e-6)
+    train_history = model.fit(train_data, validation_data=val_data, epochs=epochs, callbacks=[cp_callback, lr_callback, stop_callback])
     model.save_weights(f'checkpoint-sup-{file_ext}-final.ckpt')
 
     return model
@@ -234,7 +259,7 @@ def plot_results_mode(model, train_data, val_data, file_ext):
         predictions.append(x[np.exp(logps).argmax(axis=0)])
     predictions = np.array(predictions).flatten()
     scatter_plot(val_subset, predictions, f'val_graph-{file_ext}.png')
-
+    
     # Create binned plot
     binned_plot(val_subset, predictions, n=20, percentiles=[35,45,50], color='b', filename=f'binned_plot-{file_ext}.png')
 
@@ -256,6 +281,56 @@ def plot_loss(jobnumber):
     plt.savefig('Loss graph')
     plt.close()
 
+def val_preprocess(data):
+    image = data['image']
+    image = tf.clip_by_value(image, 0.0, 10.0)
+    image = tf.math.asinh(image / stddev)
+    return image
+
+def prepare_validation_data(fracs_path='/srv/scratch/mltidal/fracs_resized.npy'):
+    val_init_dataset = tfds.load('hsc_icl', split='train', data_dir='/srv/scratch/z5214005/tensorflow_datasets')
+    dud_only_dataset = val_init_dataset.filter(lambda x: x['id'] < 125)
+    np_val_data = dud_only_dataset.as_numpy_iterator()
+    validation_imgs = sorted(np_val_data, key=lambda x: x['id'])
+    validation_imgs = np.array(list(map(val_preprocess, validation_imgs)))
+    fracs_all = np.load(fracs_path)[0] / 1855
+    fracs = fracs_all[~np.isnan(fracs_all)]
+    validation_imgs = validation_imgs[~np.isnan(fracs_all)]
+    return (validation_imgs, fracs)
+
+def test_real_data(model, file_ext):
+    validation_data = prepare_validation_data()
+    # Look at the performance of the model
+    validation_imgs, expected = validation_data
+    # Run the model and calculate the Spearman coefficient
+    predictions = model(validation_imgs).mean().numpy().squeeze()
+    x = np.arange(0, 0.6, 0.0005)
+    outputs = model(validation_imgs)
+    logps = []
+    logcs = []
+    for i in x:
+        logps.append(outputs.log_prob(i).numpy())
+        logcs.append(outputs.log_cdf(i).numpy())
+    logps = np.stack(logps)
+    logcs = np.stack(logcs)
+    predictions = x[np.exp(logps).argmax(axis=0)]
+    # Plot the predicted values against the true values
+    q15s = np.argmax(np.exp(logcs) >= 0.15, axis=0)
+    q85s = np.argmax(np.exp(logcs) >= 0.85, axis=0)
+    lower_errors = np.abs(predictions - x[q15s])
+    upper_errors = np.abs(x[q85s] - predictions)
+    # error = 0.04
+    plt.errorbar(expected, predictions, fmt='none', yerr=(lower_errors, upper_errors), alpha=0.3)
+    plt.scatter(expected, predictions)
+    plt.plot([0, 0.35], [0,0.35], 'k--')
+    plt.xlabel('Expected')
+    plt.ylabel('Predicted')
+    plt.savefig(f'test_graph-{file_ext}.png')
+    plt.close()
+    # Print the loss
+    print(f'MAE = {np.mean(np.abs(expected - predictions))}')
+    print(pearsonr(expected, predictions))
+
 if __name__ == '__main__':
     if len(sys.argv) > 1:
         file_ext = sys.argv[1]
@@ -267,10 +342,9 @@ if __name__ == '__main__':
     model = ImageRegressor((224,224,1))
 
     negloglik = lambda y, p_y: -p_y.log_prob(y)
-    model.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-5), loss=negloglik)
-    
-    # model.load_weights('checkpoint-sup-expdata-final.ckpt').expect_partial()
-
+    model.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-4), loss=negloglik)
+    # model.load_weights('checkpoint-sup-otherlsbcont.ckpt').expect_partial()
     model = train(model, dataset, validation_dataset, epochs=100, file_ext=file_ext)
 
     plot_results(model, dataset, validation_dataset, file_ext=file_ext)
+    test_real_data(model, file_ext)
