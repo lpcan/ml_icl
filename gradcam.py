@@ -10,8 +10,8 @@ import skimage
 from astropy.io import ascii
 
 from supervised_model import ImageRegressor
-    
-def make_gradcam_heatmap(img, model, last_conv_layer_name='conv2d_187'):
+
+def make_grad_model(model, last_conv_layer_name='conv2d_187'):
     # First, we create a model that maps the input image to the activations
     # of the last conv layer
     last_conv_layer_model = keras.models.Model(model.get_layer('encoder').input, [model.get_layer('encoder').get_layer(last_conv_layer_name).output, model.get_layer('encoder').get_layer('add_59').output])
@@ -26,6 +26,9 @@ def make_gradcam_heatmap(img, model, last_conv_layer_name='conv2d_187'):
 
     grad_model = keras.Model(input, output)
 
+    return last_conv_layer_model, grad_model
+
+def make_gradcam_heatmap(img, model, last_conv_layer_model, grad_model):
     # Prepare the image
     img_array = model.layers[0](img)
 
@@ -33,7 +36,6 @@ def make_gradcam_heatmap(img, model, last_conv_layer_name='conv2d_187'):
     # with respect to the activations of the last conv layer
     with tf.GradientTape() as tape:
         out1, last_conv_layer_output = last_conv_layer_model(img_array)
-        print(out1)
 
         tape.watch(last_conv_layer_output)
 
@@ -59,7 +61,7 @@ def make_gradcam_heatmap(img, model, last_conv_layer_name='conv2d_187'):
 
     # For visualisation purposes, normalise the heatmap between 0 and 1
     heatmap = tf.maximum(heatmap, 0) / tf.math.reduce_max(heatmap)
-    return heatmap.numpy()
+    return heatmap.numpy(), img_array.numpy()
 
 if __name__=='__main__':
     # Load the data
@@ -69,8 +71,8 @@ if __name__=='__main__':
     # Get an example image and prepare it for the network
     tbl = ascii.read('/srv/scratch/z5214005/lrgs_sampled.tbl')
     keys = tbl['new_ids']
-    example_num = 39620
-    example = np.array(cutouts['45']['HDU0']['DATA'])
+    example_num = 11677
+    example = np.array(cutouts['46']['HDU0']['DATA'])
     example = skimage.transform.resize(example, (224,224))
     example = np.clip(example, a_min=0, a_max=10)
     example = np.arcsinh(example / 0.017359)
@@ -81,14 +83,16 @@ if __name__=='__main__':
     model = ImageRegressor((224,224,1))
     negloglik = lambda y, p_y: -p_y.log_prob(y)
     model.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-5), loss=negloglik)
-    model.load_weights('checkpoint-sup-newdatacont.ckpt').expect_partial()
+    model.load_weights('checkpoint-sup-iclotherlsb.ckpt').expect_partial()
 
     # Show what the model predicts
     pred = model.predict(example)
     print(f'Predicted: {pred}')
 
     # Generate the activation heatmap
-    heatmap = make_gradcam_heatmap(example, model)
+    last_conv_layer_model, grad_model = make_grad_model(model)
+    heatmap, img_array = make_gradcam_heatmap(example, model, last_conv_layer_model, grad_model)
+    example = img_array
 
     # Display the heatmap
     # Generate a colourised version of the example image
@@ -109,7 +113,6 @@ if __name__=='__main__':
     superimposed_img = jet_heatmap * 0.4 + img * 0.6
     # superimposed_img = keras.utils.array_to_img(superimposed_img)
     plt.imshow(superimposed_img)
-    plt.savefig('asdf.png')
-    plt.close()
+    plt.show()
 
     # superimposed_img.save('asdf.png')
