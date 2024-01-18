@@ -17,17 +17,17 @@ from unagi.task import hsc_bulk_cutout
 
 # Parameters
 script_dir = os.path.dirname(__file__)
-tbl_path = '../processed/lrgs_sampled.tbl' # Path relative to script directory
+tbl_path = '/srv/scratch/z5214005/lrgs_dud_sampled.tbl' # Path relative to script directory
 half_size = 1 * u.arcmin
-output_dir = os.path.join(script_dir, 'tmp')
-rerun = 'pdr2_wide'
+output_dir = '/srv/scratch/mltidal/tmp/'
+rerun = 'pdr2_dud'
 
 # HSC username: locan@local
 # HSC password: ########################################
                 
 def compute_sample_weights(table=None):
     if table is None:
-        f = fits.open(os.path.join(script_dir, '../raw/lrg_s18a_wide_sm.fits'))
+        f = fits.open('/srv/scratch/z5214005/lrg_s18a_wide_sm.fits')
         tbl = f[1].data[f[1].data['z'] <= 0.5]
         table = Table(tbl)
 
@@ -35,14 +35,14 @@ def compute_sample_weights(table=None):
     lrg_kernel = gaussian_kde(lrg_masses) # Kernel density estimate for LRGs
 
     # Get the masses of the BCGs
-    cluster_tbl = ascii.read('data/processed/camira_final.tbl')
+    cluster_tbl = ascii.read('/srv/scratch/z5214005/camira_final.tbl')
     cluster_tbl = cluster_tbl[cluster_tbl['z_cl'] <= 0.5]
 
-    members = ascii.read('data/raw/camira_s20a_wide_member.dat', 
+    members = ascii.read('/srv/scratch/z5214005/camira_s20a_wide_member.dat', 
                     names=['RA_cl', 'Dec_cl', 'Richness', 'z_cl', 'RA', 'Dec', 'M', 'w'])
     merged1 = join(members, cluster_tbl, keys_left=['RA', 'Dec'], keys_right=['RA [deg]', 'Dec [deg]'])
 
-    members = ascii.read('data/raw/camira_s20a_dud_member.dat', 
+    members = ascii.read('/srv/scratch/z5214005/camira_s20a_dud_member.dat', 
                     names=['RA_cl', 'Dec_cl', 'Richness', 'z_cl', 'RA', 'Dec', 'M', 'w'])
     merged2 = join(members, cluster_tbl, keys_left=['RA', 'Dec'], keys_right=['RA [deg]', 'Dec [deg]'])
     merged = vstack([merged1, merged2])
@@ -50,14 +50,14 @@ def compute_sample_weights(table=None):
     bcg_masses = merged['M']
     bcg_kernel = gaussian_kde(bcg_masses) # Kernel density estimate for BCGs
 
-    step = 0.001
+    step = 0.001 # Larger step means faster computation but less accurate kernel
     pts = np.arange(lrg_masses.min(), lrg_masses.max(), step=step)
     probs_lrg = lrg_kernel(pts)
     probs_bcg = bcg_kernel(pts) 
 
     weights = probs_bcg / probs_lrg
 
-    idxs = ((lrg_masses - lrg_masses.min()) // step).astype(int)
+    idxs = ((lrg_masses - lrg_masses.min()) // step).astype(int) # What weight does each entry in the lrg table correspond to? 
     weights = weights[idxs]
 
     return weights / np.sum(weights) # Needs to be a vector of probabilities
@@ -85,9 +85,9 @@ def create_table(size=50_000):
 
 def download_bulk(tbl, overwrite=False):
     if overwrite:
-        resized_cutouts = h5py.File('lrg_cutouts_resized.hdf', 'w') # File to put all the processed cutouts into
+        resized_cutouts = h5py.File('/srv/scratch/z5214005/lrg_cutouts_dud_resized.hdf', 'w') # File to put all the processed cutouts into
     else:
-        resized_cutouts = h5py.File('lrg_cutouts_resized.hdf', 'a')
+        resized_cutouts = h5py.File('/srv/scratch/z5214005/lrg_cutouts_dud_resized.hdf', 'a')
 
     # Remove any rows that have already been downloaded
     to_remove = []
@@ -106,26 +106,34 @@ def download_bulk(tbl, overwrite=False):
     to_download = tbl[unique_ids]
     to_download['repeats'] = repeats
     to_download['unique_ids'] = unique_ids
-    inds = np.arange(len(to_download) + 2000, step=2000)
+    inds = np.arange(len(to_download) + 1000, step=1000)
 
     for i in range(len(inds) - 1):
         # Download the cutouts
         sub_tbl = to_download[inds[i]:inds[i+1]]
 
-        filename = hsc_bulk_cutout(sub_tbl, cutout_size=half_size, filters='r', archive=pdr2, overwrite=True, tmp_dir=os.path.join(script_dir, 'tmp'))
+        filename = hsc_bulk_cutout(sub_tbl, cutout_size=half_size, filters='r', archive=pdr2, overwrite=True, tmp_dir=output_dir, mask=True)
 
         # Open the HDF file, resize the cutouts to 224x224 and save into a new file
         print('Resizing batch...')
         cutouts = h5py.File(filename)
         
         for j, key in enumerate(sub_tbl['object_id']):
+            if str(key) not in cutouts:
+                print(f'Key {key} missing from download')
+                continue
             cutout = np.array(cutouts[str(key)]['HSC-R']['HDU0']['DATA'])
             resized = skimage.transform.resize(cutout, (224,224))
             # If necessary, save multiple copies of this galaxy
             for repeat in range(sub_tbl['repeats'][j]):
                 tbl_id = sub_tbl['unique_ids'][j]
                 new_key = tbl['new_ids'][tbl_id+repeat]
-                resized_cutouts[f'{new_key}/HDU0/DATA'] = resized.copy()
+                if new_key in resized_cutouts:
+                    # This key already exists in the file, do not overwrite
+                    print(f'Clash with key {new_key}')
+                    continue
+                else:
+                    resized_cutouts[f'{new_key}/HDU0/DATA'] = resized.copy()
         print('Batch resized to 224x224 cutouts')
         cutouts.close()
 
@@ -135,6 +143,6 @@ if __name__ == '__main__':
         tbl = create_table()
         tbl.write(os.path.join(script_dir, '../processed/lrgs_sampled.tbl'), format='ascii', overwrite=True)
     else:
-        tbl = ascii.read(os.path.join(script_dir, tbl_path))
+        tbl = ascii.read(tbl_path)
 
-    download_bulk(tbl, overwrite=False)
+    download_bulk(tbl, overwrite=True)

@@ -13,9 +13,11 @@ end = 10000
 
 results = Table(names=['object_id', 'user_ra', 'user_dec', 'user_ms', 'user_z'])
 
+# Set environment variable 'HSC_SSP_CAS_PASSWORD' to HSC password to avoid having to keep reentering it
+
 while start < len(tbl):
-    query = main(tbl[start:end], 'pdr2_dud')
-    result = sql_query(query, user='locan@local', release_version='pdr2')
+    query = main(tbl[start:end], 'pdr2_dud') # Generates crossmatch query for this table in r-band
+    result = sql_query(query, user='locan@local', release_version='pdr2') # Submit the query
     results = vstack([results, result])
     end += 10000
     start += 10000

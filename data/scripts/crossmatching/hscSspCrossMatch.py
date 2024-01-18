@@ -144,7 +144,7 @@ def main(
     )
 
     query = template.format(**args)
-    print(query)
+    # print(query)
     return query
 
 
@@ -301,6 +301,7 @@ FROM
     match LEFT JOIN {rerun}.forced USING(object_id)
 WHERE
     isprimary
+    AND NOT r_cmodel_flag
 """
 
 if __name__ == "__main__":

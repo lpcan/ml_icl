@@ -14,10 +14,10 @@ from unagi.task import hsc_cutout
 # Parameters
 script_dir = os.path.dirname(__file__)
 
-cat_path = os.path.join(script_dir, "../raw/camira_s20a_dud.tbl") #"../raw/camira_s20a_wide.tbl"
+cat_path = '/srv/scratch/z5214005/camira_final.tbl' #"../raw/camira_s20a_wide.tbl"
 exclude = None #"../raw/camira_s20a_dud.tbl"
 half_size = 1 * u.arcmin
-output_dir = os.path.join(script_dir, '../../cutouts_550kpc/') #"../raw/cutouts/"
+output_dir = '/srv/scratch/mltidal/' #"../raw/cutouts/"
 rerun = "pdr2_dud"
 
 # HSC username: locan@local
@@ -31,7 +31,7 @@ tbl = ascii.read(cat_path, names = ['ID',
                                     'z_cl', 
                                     'Richness', 
                                     'BCG redshift'])
-
+tbl = tbl[:125]
 zs = tbl['z_cl']
 ras = tbl['RA [deg]'][zs <= 0.5]
 decs = tbl['Dec [deg]'][zs <= 0.5]
@@ -76,10 +76,6 @@ cosmo = FlatLambdaCDM(H0=68.4, Om0=0.301)
 
 for i,c in enumerate(coords):
     print(f"Downloading cluster {i}")
-
-    ################ REMOVE THIS LATER #####################
-    half_size = cosmo.arcsec_per_kpc_proper(zs[i]) * 550 * u.kpc
-    ########################################################
 
     try:
         hsc_cutout(c, cutout_size=half_size, filters='r', archive=pdr2, 
