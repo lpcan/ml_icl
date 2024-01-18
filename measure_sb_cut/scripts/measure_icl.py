@@ -127,13 +127,13 @@ def counts2sb(counts, z):
 def sb2counts(sb): # without reaccounting for dimming
     return 10**(-0.4*(sb - 2.5*np.log10(63095734448.0194) - 5.*np.log10(0.168)))
 
-def create_cold_labels(cutout, bad_mask):
+def create_cold_labels(cutout, bad_mask, kernel_size=5, npixels=40):
     # First apply the bright star mask
     mask_input = np.array(cutout)
     mask_input[bad_mask] = np.nan
 
     # Smooth the image to help detect extended bright sources
-    kernel = Gaussian2DKernel(5)
+    kernel = Gaussian2DKernel(kernel_size)
     kernel.normalize()
     convolved = convolve(mask_input, kernel)
     
@@ -144,16 +144,16 @@ def create_cold_labels(cutout, bad_mask):
     threshold = detect_threshold(mask_input, nsigma=1.1, background=background, mask=bad_mask)
 
     # Detect sources
-    segm = detect_sources(convolved, threshold=threshold, npixels=40)
+    segm = detect_sources(convolved, threshold=threshold, npixels=npixels)
 
     return segm.data
 
-def create_hot_labels(unsharp, bad_mask, background):
+def create_hot_labels(unsharp, bad_mask, background, npixels=7):
     # Detect threshold
     threshold = detect_threshold(unsharp, nsigma=1.2, background=background, mask=bad_mask)
     
     # Detect sources
-    segm = detect_sources(unsharp, threshold, npixels=7, mask=bad_mask)
+    segm = detect_sources(unsharp, threshold, npixels=npixels, mask=bad_mask)
 
     return segm.data
 
@@ -172,7 +172,7 @@ def calc_icl_frac(args):
     keys, length, zs, richness, merged = args
 
     base_path = os.path.dirname(__file__)
-    cutouts = h5py.File('/srv/scratch/z5214005/cutouts_550.hdf') #'/../processed/cutouts.hdf')
+    cutouts = h5py.File('/srv/scratch/z5214005/hsc_icl/cutouts.hdf') #'/../processed/cutouts.hdf')
 
     # Find the shared memory and create a numpy array interface
     shmem = SharedMemory(name=f'iclbuf', create=False)
@@ -195,8 +195,8 @@ def calc_icl_frac(args):
         # Create the bright objects mask
         BAD = 1
         BRIGHT_OBJECT = 512
-        mask_data = np.array(cutouts[str(key)]['HDU1']['DATA']).astype(int)
-        bad_mask = np.array(mask_data & (BAD | BRIGHT_OBJECT)).astype(bool)
+        # mask_data = np.array(cutouts[str(key)]['HDU1']['DATA']).astype(int)
+        bad_mask = np.zeros_like(cutout, dtype=bool) #np.array(mask_data & (BAD | BRIGHT_OBJECT)).astype(bool)
 
         # Create the circular mask
         radius = np.min((richness[key] * 17 - 125, 350))
@@ -322,10 +322,12 @@ def calc_icl_frac_parallel(cutouts, zs, richness, merged):
     """
     # Use all available cores
     cores = mp.cpu_count()
+    # num_keys = len(cutouts.keys())
+    num_keys = 125
 
     # Divide the keys up into 20 
-    jobs = np.array_split(np.arange(len(cutouts.keys())), 20)
-    length = len(cutouts.keys()) * 3
+    jobs = np.array_split(np.arange(num_keys), 20)
+    length = num_keys * 3
     args = [(j, length, zs, richness, merged) for j in jobs]
 
     exit = False
@@ -333,9 +335,9 @@ def calc_icl_frac_parallel(cutouts, zs, richness, merged):
         # Set up the shared memory
         global mem_id
         mem_id = 'iclbuf'
-        nbytes = len(cutouts.keys()) * 3 * np.float64(1).nbytes 
+        nbytes = num_keys * 3 * np.float64(1).nbytes 
         iclmem = SharedMemory(name='iclbuf', create=True, size=nbytes)
-        nbytes = len(cutouts.keys()) * 2208**2 * np.float64(1).nbytes # Max size of circ mask is 2208^2 px
+        nbytes = num_keys * 2208**2 * np.float64(1).nbytes # Max size of circ mask is 2208^2 px
         maskmem = SharedMemory(name='maskbuf', create=True, size=nbytes)
 
         # Start a new process for each task
@@ -352,9 +354,9 @@ def calc_icl_frac_parallel(cutouts, zs, richness, merged):
             pool.close()
             pool.join()
             # Copy the result
-            result = np.ndarray((3, len(cutouts.keys())), buffer=iclmem.buf,
+            result = np.ndarray((3, num_keys), buffer=iclmem.buf,
                                 dtype=np.float64).copy()
-            masks = np.ndarray((len(cutouts.keys()), 2208, 2208), buffer=maskmem.buf,
+            masks = np.ndarray((num_keys, 2208, 2208), buffer=maskmem.buf,
                                dtype=np.float64).copy()
     finally:
         # Close the shared memory
@@ -373,7 +375,7 @@ if __name__ == '__main__':
     base_path = os.path.dirname(__file__)
 
     # Load the cutouts and the corresponding redshifts
-    cutouts = h5py.File('/srv/scratch/z5214005/cutouts_550.hdf') #'/../processed/cutouts.hdf')
+    cutouts = h5py.File('/srv/scratch/z5214005/hsc_icl/cutouts.hdf') #'/../processed/cutouts.hdf')
     tbl = ascii.read('/srv/scratch/z5214005/camira_final.tbl', #'/../processed/camira_final.tbl', 
                     names=['ID', 'Name', 'RA [deg]', 'Dec [deg]', 'z', 'Richness', 'BCG z'])
     zs = tbl['z']
@@ -396,5 +398,5 @@ if __name__ == '__main__':
     print(list(zip(top_5, fracs[2][top_5])))
     print(list(zip(bottom_5, fracs[2][bottom_5])))
 
-    np.save('/srv/scratch/mltidal/fracs_central_only_26.npy', fracs) 
+    np.save('/srv/scratch/mltidal/fracs_2arcmin.npy', fracs) 
     # np.save('/srv/scratch/z5214005/masks.npy', masks)
