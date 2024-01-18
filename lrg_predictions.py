@@ -6,7 +6,7 @@ from tensorflow import keras
 import matplotlib.pyplot as plt
 import skimage
 
-from supervised_model_prob import ImageRegressor
+from supervised_model import ImageRegressor
 
 # Instantiate the model
 model_checkpoint = 'checkpoint-sup-expdatacont2-final.ckpt'
@@ -50,15 +50,14 @@ for bcg in cutouts.keys():
     bcg_predictions.append(model(img).mean().numpy().squeeze())
 
 # Create a histogram showing both of these distributions
+plt.style.use('dark_background')
 plt.subplot(211)
-_, bins, _ = plt.hist(lrg_predictions, facecolor='b', alpha=0.5, edgecolor='b')
-# plt.yscale('log')
+_, bins, _ = plt.hist(lrg_predictions, facecolor='#8ED3C8', edgecolor='#ACFFF2')
 plt.title('ICL predictions for LRGs')
 plt.xlabel('ICL fraction')
 plt.ylabel('Count')
 plt.subplot(212)
-plt.hist(bcg_predictions, bins=bins, facecolor='b', alpha=0.5, edgecolor='b')
-# plt.yscale('log')
+plt.hist(bcg_predictions, bins=bins, facecolor='#8ED3C8', edgecolor='#ACFFF2')
 plt.title('ICL predictions for BCGs')
 plt.xlabel('ICL fraction')
 plt.ylabel('Count')
