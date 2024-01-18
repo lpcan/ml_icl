@@ -42,7 +42,7 @@ def get_member_locs(idx, merged, cutout_shape):
     
     return (x_locs, y_locs)
 
-def inject_icl(cutout_id, cutouts, z, seg_threshold=26):
+def inject_icl(cutout_id, cutouts, z, seg_threshold=25):
     
     cutout = cutouts[str(cutout_id)]['HDU0']['DATA']
 
@@ -58,7 +58,7 @@ def inject_icl(cutout_id, cutouts, z, seg_threshold=26):
     # Need to renumber watershed labels to prevent two different objects with same label
     labels = np.where(watershed_labels > 0, watershed_labels + np.max(labels), labels)
 
-    sb_threshold = 26 + 10 * np.log10(1+z) # Calculate mask threshold at this z
+    sb_threshold = seg_threshold + 10 * np.log10(1+z) # Calculate mask threshold at this z
     threshold = 10**(-0.4*(sb_threshold - 2.5*np.log10(63095734448.0194) - 5.*np.log10(0.168))) # Convert to counts
 
     # Figure out what to use as r_eff
@@ -132,6 +132,11 @@ def inject_icl(cutout_id, cutouts, z, seg_threshold=26):
         quantile -= 0.25
     
     # Generate the final image
+    # Add some noise to the ICL 
+    std = mad_std(cutout * ~bright_parts) # Standard deviation of the background (+icl)
+    noise = np.random.normal(loc=0, scale=std, size=cutout.shape)
+    noisy_icl = icl_img + noise
+
     # Add the ICL image to the non bright parts
     bkg = cutout * ~final_bright_parts
     # sb_limit = 29 + 10 * np.log10(1+z) # Calculate the sb limit
@@ -139,16 +144,10 @@ def inject_icl(cutout_id, cutouts, z, seg_threshold=26):
     # bkg = bkg * (bkg > limit)
     icl_img_norm = icl_img / threshold # this version goes between 0 and 1
     bkg = bkg * (1 - icl_img_norm) # fade out when the ICL is there. Might need this to be a mask instead
-    icl_img = bkg + icl_img
+    icl_img = bkg + noisy_icl
     # Add to the bright parts
-    img_no_noise = (cutout * final_bright_parts) + icl_img
+    img = (cutout * final_bright_parts) + icl_img
 
-    # Generate some noise
-    # std = mad_std(cutout * ~bright_parts) # Standard deviation of the background (+icl)
-    noise = np.random.normal(loc=0, scale=0.01, size=cutout.shape)
-
-    # Add to final image
-    img = img_no_noise + noise
     img = img.astype('<f4')
 
     result = {}
@@ -163,8 +162,8 @@ def inject_icl(cutout_id, cutouts, z, seg_threshold=26):
     return result
 
 if __name__ == '__main__':
-    cutouts = h5py.File('/srv/scratch/z5214005/lrg_cutouts_resized.hdf')
-    tbl = ascii.read('/srv/scratch/z5214005/lrgs_sampled.tbl')
+    cutouts = h5py.File('/srv/scratch/z5214005/lrg_cutouts_dud_resized.hdf')
+    tbl = ascii.read('/srv/scratch/z5214005/lrgs_dud_sampled.tbl')
 
     # # Load the cluster member catalogue
     # members = ascii.read('data/raw/camira_s20a_wide_member.dat', 
@@ -174,7 +173,7 @@ if __name__ == '__main__':
     # merged = join(members, tbl, keys_left=['RA_cl', 'Dec_cl'], keys_right=['RA [deg]', 'Dec [deg]'])
     # merged = merged['ID', 'Name', 'RA_cl', 'Dec_cl', 'z_cl_1', 'RA', 'Dec']
 
-    generated_data = h5py.File('/srv/scratch/mltidal/generated_data_otherlsb.hdf', 'w')
+    generated_data = h5py.File('/srv/scratch/mltidal/generated_data_deep_v2.hdf', 'w')
     # fracs = []
     # finder = SourceFinder(npixels=20, progress_bar=False, nlevels=8)
 
