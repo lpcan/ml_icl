@@ -8,6 +8,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.stats import pearsonr
 import sys
+import wandb
+from wandb.keras import WandbMetricsLogger, WandbModelCheckpoint
 
 import resnet_cifar10_v2
 from augmentations import augmenter
@@ -22,7 +24,8 @@ num_components = 16
 def preprocess(image, label):
     image = tf.clip_by_value(image, 0.0, 10.0)
     image = tf.math.asinh(image / stddev)
-    label = label / 1855 # normalise the value between 0 and 1
+    # label = tf.math.maximum(label, 1e-9)
+    # label = tf.math.tanh(label / 400) # / 2868 # normalise the value between 0 and 1
     return image, label
 
 from scipy.stats import gaussian_kde
@@ -49,7 +52,7 @@ def preprocess_with_weights(image, label, weights):
 
 # Load and split the dataset into train and test set
 def prepare_data():
-    ds = (tfds.load('supervised_data_1', split='train', data_dir='/srv/scratch/mltidal/tensorflow_datasets', as_supervised=True)
+    ds = (tfds.load('supervised_data', split='train', data_dir='/srv/scratch/mltidal/tensorflow_datasets', as_supervised=True)
     )
 
     dataset, validation_dataset = keras.utils.split_dataset(ds, left_size=0.9, right_size=0.1, shuffle=False)
@@ -107,8 +110,21 @@ def train(model, train_data, val_data, epochs=100, file_ext=''):
     )
     stop_callback = keras.callbacks.EarlyStopping(monitor='val_loss', patience=25)
     lr_callback = keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.1, patience=20, verbose=1, min_lr=1e-6)
-    train_history = model.fit(train_data, validation_data=val_data, epochs=epochs, callbacks=[cp_callback, lr_callback, stop_callback])
+    train_history = model.fit(train_data, validation_data=val_data, 
+                              epochs=epochs, 
+                              callbacks=[
+                                  cp_callback,
+                                  lr_callback, 
+                                  stop_callback,
+                                  WandbMetricsLogger(),
+                                ],
+                                verbose=2)
+    print(f'Saving model as {file_ext}')
     model.save_weights(f'checkpoint-sup-{file_ext}-final.ckpt')
+
+    # Save all the checkpoint files to wandb
+    wandb.save(f'checkpoint-sup-{file_ext}.ckpt*')
+    wandb.save(f'checkpoint-sup-{file_ext}-final.ckpt*')
 
     return model
 
@@ -263,15 +279,19 @@ def plot_results_mode(model, train_data, val_data, file_ext):
     # Create binned plot
     binned_plot(val_subset, predictions, n=20, percentiles=[35,45,50], color='b', filename=f'binned_plot-{file_ext}.png')
 
-def plot_loss(jobnumber):
-    f = open(f'sup_train.pbs.o{jobnumber}')
+def plot_loss(jobnumbers):
     loss = []
     val_loss = []
-    for line in f:
-        words = line.split(' ')
-        if 'loss:' in words:
-            loss.append(float(words[7]))
-            val_loss.append(float(words[-1]))
+    for job in jobnumbers:
+        try:
+            f = open(f'sup_train.pbs.o{job}')
+        except:
+            f = open(f'jobs/job_outputs/sup_train.pbs.o{job}')
+        for line in f:
+            words = line.split(' ')
+            if 'loss:' in words:
+                loss.append(float(words[words.index('loss:')+1]))
+                val_loss.append(float(words[words.index('val_loss:')+1]))
     
     plt.plot(np.arange(len(loss)), loss)
     plt.plot(np.arange(len(val_loss)), val_loss)
@@ -293,13 +313,14 @@ def prepare_validation_data(fracs_path='/srv/scratch/mltidal/fracs_resized.npy')
     np_val_data = dud_only_dataset.as_numpy_iterator()
     validation_imgs = sorted(np_val_data, key=lambda x: x['id'])
     validation_imgs = np.array(list(map(val_preprocess, validation_imgs)))
-    fracs_all = np.load(fracs_path)[0] / 1855
+    # fracs_all = np.tanh(np.load(fracs_path)[0] / 400)
+    fracs_all = np.load(fracs_path)[2]
     fracs = fracs_all[~np.isnan(fracs_all)]
     validation_imgs = validation_imgs[~np.isnan(fracs_all)]
     return (validation_imgs, fracs)
 
-def test_real_data(model, file_ext):
-    validation_data = prepare_validation_data()
+def test_real_data(model, file_ext, fracs_path='/srv/scratch/mltidal/fracs_resized.npy'):
+    validation_data = prepare_validation_data(fracs_path=fracs_path)
     # Look at the performance of the model
     validation_imgs, expected = validation_data
     # Run the model and calculate the Spearman coefficient
@@ -322,7 +343,8 @@ def test_real_data(model, file_ext):
     # error = 0.04
     plt.errorbar(expected, predictions, fmt='none', yerr=(lower_errors, upper_errors), alpha=0.3)
     plt.scatter(expected, predictions)
-    plt.plot([0, 0.35], [0,0.35], 'k--')
+    maxval = np.max([expected, predictions])
+    plt.plot([0, maxval], [0, maxval], 'k--')
     plt.xlabel('Expected')
     plt.ylabel('Predicted')
     plt.savefig(f'test_graph-{file_ext}.png')
@@ -331,19 +353,38 @@ def test_real_data(model, file_ext):
     print(f'MAE = {np.mean(np.abs(expected - predictions))}')
     print(pearsonr(expected, predictions))
 
+def load_model(model_name=None):
+    model = ImageRegressor((224,224,1))
+
+    negloglik = lambda y, p_y: -p_y.log_prob(y)
+    model.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-4), loss=negloglik)
+    if model_name is not None: 
+        model.load_weights(f'checkpoints/checkpoint-sup-{model_name}.ckpt').expect_partial()
+
+    return model
+
 if __name__ == '__main__':
     if len(sys.argv) > 1:
         file_ext = sys.argv[1]
     else:
         file_ext = ''
 
+    wandb.init(
+    project='ml-icl',
+    config={
+        'epochs': 100, 
+        'train_batch_size': 50,
+        'val_batch_size': 100,
+        'optimizer': 'adam',
+    },
+    # id='ukhgr5k6',
+    # resume='must'
+    )
+
     dataset, validation_dataset = prepare_data()
 
-    model = ImageRegressor((224,224,1))
+    model = load_model(model_name=None)
 
-    negloglik = lambda y, p_y: -p_y.log_prob(y)
-    model.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-4), loss=negloglik)
-    # model.load_weights('checkpoint-sup-otherlsbcont.ckpt').expect_partial()
     model = train(model, dataset, validation_dataset, epochs=100, file_ext=file_ext)
 
     plot_results(model, dataset, validation_dataset, file_ext=file_ext)
