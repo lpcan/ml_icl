@@ -132,7 +132,6 @@ def val_augmenter(input_shape):
         [
             layers.Input(shape=input_shape),
             layers.Normalization(mean=0.948, variance=1.108**2),
-            layers.RandomFlip(mode='horizontal_and_vertical'),
-            RandomGaussianNoise(stddev=0),
+            # RandomGaussianNoise(stddev=0.017359),
         ]
     )
