@@ -10,17 +10,18 @@ import matplotlib.pyplot as plt
 import numpy as np
 import os
 from scipy.stats import gaussian_kde
+import shutil
 import skimage
 from unagi import hsc
-from unagi.task import hsc_bulk_cutout
-# from task import hsc_bulk_cutout
+# from unagi.task import hsc_bulk_cutout
+from task import hsc_bulk_cutout
 
 # Parameters
 script_dir = os.path.dirname(__file__)
-tbl_path = '/srv/scratch/z5214005/lrgs_dud_sampled.tbl' # Path relative to script directory
+tbl_path = '/srv/scratch/z5214005/lrgs_sampled_new.tbl' # Path relative to script directory
 half_size = 1 * u.arcmin
 output_dir = '/srv/scratch/mltidal/tmp/'
-rerun = 'pdr2_dud'
+rerun = 'pdr2_wide'
 
 # HSC username: locan@local
 # HSC password: ########################################
@@ -85,9 +86,9 @@ def create_table(size=50_000):
 
 def download_bulk(tbl, overwrite=False):
     if overwrite:
-        resized_cutouts = h5py.File('/srv/scratch/z5214005/lrg_cutouts_dud_resized.hdf', 'w') # File to put all the processed cutouts into
+        resized_cutouts = h5py.File('/srv/scratch/z5214005/lrg_cutouts_resized_new.hdf', 'w') # File to put all the processed cutouts into
     else:
-        resized_cutouts = h5py.File('/srv/scratch/z5214005/lrg_cutouts_dud_resized.hdf', 'a')
+        resized_cutouts = h5py.File('/srv/scratch/z5214005/lrg_cutouts_resized_new.hdf', 'a')
 
     # Remove any rows that have already been downloaded
     to_remove = []
@@ -112,7 +113,7 @@ def download_bulk(tbl, overwrite=False):
         # Download the cutouts
         sub_tbl = to_download[inds[i]:inds[i+1]]
 
-        filename = hsc_bulk_cutout(sub_tbl, cutout_size=half_size, filters='r', archive=pdr2, overwrite=True, tmp_dir=output_dir, mask=True)
+        filename = hsc_bulk_cutout(sub_tbl, cutout_size=half_size, filters='r', archive=pdr2, overwrite=True, tmp_dir=output_dir, mask=False)
 
         # Open the HDF file, resize the cutouts to 224x224 and save into a new file
         print('Resizing batch...')
@@ -137,6 +138,14 @@ def download_bulk(tbl, overwrite=False):
         print('Batch resized to 224x224 cutouts')
         cutouts.close()
 
+        # Remove the temporary files
+        files = os.listdir(output_dir)
+        for file in files:
+            if os.path.isfile(os.path.join(output_dir, file)):
+                os.remove(os.path.join(output_dir, file))
+            else:
+                shutil.rmtree(os.path.join(output_dir, file)) # is a directory
+
 if __name__ == '__main__':
     if tbl_path is None:
         # No table path provided, create and save a new table
@@ -145,4 +154,4 @@ if __name__ == '__main__':
     else:
         tbl = ascii.read(tbl_path)
 
-    download_bulk(tbl, overwrite=True)
+    download_bulk(tbl, overwrite=False)
