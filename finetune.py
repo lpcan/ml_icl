@@ -8,18 +8,21 @@ import pickle
 
 from supervised_model import ImageRegressor
 
-MODEL_VERSION = 'deepv2-final'
+MODEL_VERSION = 'resnet50relu-final'
+
+def flatten(list):
+    return np.array([i for row in list for i in row])
 
 # Create the finetuning dataset
-fracs = np.load('/srv/scratch/mltidal/fracs_actual.npy')[2]
+fracs = np.load('/srv/scratch/mltidal/fracs_manual_updated.npy')[2]
 zeros = np.where(fracs == 0)[0]
 if len(zeros) > 0:
     fracs[zeros] = 0.00001
-    
+
 not_nans = np.where(~np.isnan(fracs))[0]
 
 # Prepare the images
-cutouts = h5py.File('/srv/scratch/z5214005/hsc_icl/cutouts.hdf')
+cutouts = h5py.File('/srv/scratch/z5214005/cutouts.hdf')
 images = []
 for idx in not_nans:
     cutout = np.array(cutouts[str(idx)]['HDU0']['DATA'])
@@ -31,6 +34,8 @@ for idx in not_nans:
 
 images = np.array(images) 
 
+fracs = fracs[not_nans]
+
 # Get the splits for cross-validation
 k = 5
 rng = np.random.default_rng(seed=24)
@@ -38,16 +43,23 @@ idxs = np.arange(len(fracs))
 rng.shuffle(idxs)
 splits = np.array_split(idxs, k)
 
+# sorted_idxs = np.argsort(fracs)
+# allocation = np.array([x % k for x in range(len(fracs))])
+# splits = []
+# for i in range(k):
+#     splits.append(sorted_idxs[allocation == i])
+# print(splits)
+
 test_results = []
 err_l = []
 err_h = []
 
 # Train different versions of the model
-for i in range(k):
+for run in range(k):
     # Create the datasets for this split
-    test_set = splits[i]
+    test_set = splits[run]
     train_set = splits.copy()
-    train_set.pop(i)
+    train_set.pop(run)
     train_set = np.concatenate(train_set)
 
     test_ds = images[test_set]
@@ -58,8 +70,9 @@ for i in range(k):
     # Create the model
     finetune_model = ImageRegressor((224,224,1))
     negloglik = lambda y, p_y: -p_y.log_prob(y)
-    finetune_model.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-7), loss=negloglik)
-    finetune_model.load_weights(f'checkpoints/checkpoint-sup-{MODEL_VERSION}.ckpt').expect_partial()
+    optimizer = keras.optimizers.Adam(learning_rate=1e-6)
+    finetune_model.compile(optimizer=optimizer, loss=negloglik)
+    finetune_model.load_weights(f'checkpoint-sup-{MODEL_VERSION}.ckpt').expect_partial()
 
     # Freeze the entire model other than the dense layers
     for layer in finetune_model._flatten_layers():
@@ -108,15 +121,9 @@ for i in range(k):
     err_l.append(lower_errors)
     err_h.append(upper_errors)
 
-    # plt.errorbar(test_labels, predictions, fmt='none', yerr=(lower_errors, upper_errors), alpha=0.3)
-    # plt.scatter(test_labels, predictions)
-    # # predictions = lora_model.predict(train_ds)
-    # # plt.scatter(train_labels, predictions)
-    # plt.plot([0,0.35], [0,0.35], 'k--')
-    # plt.xlabel('Expected')
-    # plt.ylabel('Predicted')
-    # plt.savefig('asdf.png')
-    # plt.close()
+    # Save this version of the model as a checkpoint
+    print(f'Saving model as {MODEL_VERSION}-split{run}')
+    finetune_model.save_weights(f'/srv/scratch/mltidal/finetuning_results/checkpoints/checkpoint-{MODEL_VERSION}_exp-split{run}.ckpt')
 
 for i in range(k):
     x = fracs[splits[i]]
@@ -124,7 +131,7 @@ for i in range(k):
     plt.errorbar(x, y, fmt='none', yerr=(err_l[i], err_h[i]), alpha=0.3)
     plt.scatter(x, y)
 
-flattened_results = [i for row in test_results for i in row]
+flattened_results = flatten(test_results)
 maxval = np.max([fracs, flattened_results])
 plt.plot([0,maxval], [0,maxval], 'k--')
 plt.xlabel('Expected')
@@ -133,10 +140,45 @@ plt.savefig('asdf1.png')
 plt.close()
 
 # Save the results so the plot can be recreated
-with open(f'/srv/scratch/mltidal/finetuning_results/{MODEL_VERSION}.pkl', 'wb') as fp:
+with open(f'/srv/scratch/mltidal/finetuning_results/{MODEL_VERSION}_exp.pkl', 'wb') as fp:
     pickle.dump([test_results, err_l, err_h], fp)
 
 # Get overall stats
-actual = fracs[splits].flatten()
+actual = fracs[flatten(splits)]
+print(f'MAE = {np.mean(np.abs(flattened_results - actual))}')
+print(pearsonr(actual, flattened_results))
+
+err_l = flatten(err_l)
+err_h = flatten(err_h)
+
+sorted_idxs = np.argsort(actual)
+binned_results = np.array_split(flattened_results[sorted_idxs], 5)
+binned_fracs = np.array_split(actual[sorted_idxs], 5)
+
+# Calculate the median of the binned results
+x = []
+y = []
+xerr_l = []
+xerr_h = []
+for i in range(len(binned_results)):
+    x_med = np.median(binned_fracs[i])
+    x.append(x_med)
+    y_med = np.median(binned_results[i])
+    y.append(y_med)
+
+    xerr_l.append(x_med - np.min(binned_fracs[i]))
+    xerr_h.append(np.max(binned_fracs[i]) - x_med)
+
+plt.errorbar(actual, flattened_results, fmt='none', yerr=(err_l, err_h), alpha=0.2, color='gray')
+plt.plot(actual, flattened_results, '.', color='gray', alpha=0.3)
+plt.plot(x, y, 'or')
+plt.plot(x, y, 'r')
+plt.errorbar(x, y, fmt='none', xerr=(xerr_l, xerr_h), color='red', alpha=0.3)
+plt.xlabel('Expected')
+plt.ylabel('Predicted')
+plt.plot([0,maxval], [0,maxval], 'k--')
+
+plt.savefig('funs.png')
+
 print(f'MAE = {np.mean(np.abs(flattened_results - actual))}')
 print(pearsonr(actual, flattened_results))
