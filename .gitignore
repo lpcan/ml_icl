@@ -10,3 +10,4 @@ data/notebooks/HSC footprint/*
 *__pycache__*
 .*
 jobs
+wandb
