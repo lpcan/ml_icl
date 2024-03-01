@@ -6,15 +6,17 @@ import tensorflow_datasets as tfds
 import tensorflow_probability as tfp
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib as mpl
 from scipy.stats import pearsonr
 import sys
 import wandb
-from wandb.keras import WandbMetricsLogger, WandbModelCheckpoint
+from wandb.keras import WandbMetricsLogger
 
 import resnet_cifar10_v2
 from augmentations import augmenter
+from contrastive_model.scripts.model import NNCLR
 
-N = 2
+N = 6
 DEPTH = N*9+2
 NUM_BLOCKS = ((DEPTH - 2) // 9) - 1
 stddev = 0.017359
@@ -24,7 +26,8 @@ num_components = 16
 def preprocess(image, label):
     image = tf.clip_by_value(image, 0.0, 10.0)
     image = tf.math.asinh(image / stddev)
-    # label = tf.math.maximum(label, 1e-9)
+    label = tf.math.maximum(label, 1e-9)
+    label = label
     # label = tf.math.tanh(label / 400) # / 2868 # normalise the value between 0 and 1
     return image, label
 
@@ -52,10 +55,10 @@ def preprocess_with_weights(image, label, weights):
 
 # Load and split the dataset into train and test set
 def prepare_data():
-    ds = (tfds.load('supervised_data', split='train', data_dir='/srv/scratch/mltidal/tensorflow_datasets', as_supervised=True)
+    dataset, validation_dataset = (tfds.load('supervised_data', split=['train[:90%]', 'train[90%:]'], data_dir='/srv/scratch/mltidal/tensorflow_datasets', as_supervised=True)
     )
 
-    dataset, validation_dataset = keras.utils.split_dataset(ds, left_size=0.9, right_size=0.1, shuffle=False)
+    # dataset, validation_dataset = keras.utils.split_dataset(ds, left_size=0.9, right_size=0.1, shuffle=False)
     dataset = dataset.batch(50)
     validation_dataset = validation_dataset.batch(100)
     # weights = get_weights(dataset)
@@ -70,6 +73,8 @@ def encoder(input_shape):
     inputs = layers.Input(input_shape, name="encoder_input")
     x = resnet_cifar10_v2.stem(inputs)
     x = resnet_cifar10_v2.learner(x, NUM_BLOCKS)
+    # x = layers.BatchNormalization()(x)
+    x = layers.ReLU()(x)
     outputs = layers.GlobalAveragePooling2D(name="backbone_pool")(x)
 
     return keras.Model(inputs, outputs, name="encoder")
@@ -109,7 +114,7 @@ def train(model, train_data, val_data, epochs=100, file_ext=''):
         save_weights_only=True
     )
     stop_callback = keras.callbacks.EarlyStopping(monitor='val_loss', patience=25)
-    lr_callback = keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.1, patience=20, verbose=1, min_lr=1e-6)
+    lr_callback = keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.1, patience=10, verbose=1, min_lr=1e-6)
     train_history = model.fit(train_data, validation_data=val_data, 
                               epochs=epochs, 
                               callbacks=[
@@ -172,6 +177,8 @@ def binned_plot(dataset, Y, filename='binned_plot.png', n=10, percentiles=[35, 5
     if ax is None:
         f, ax = plt.subplots()
 
+    # ax.scatter(X, Y, facecolors='None', edgecolors='gray', alpha=0.3)
+
     bin_centers = [np.mean(bin_edges[i:i+2]) for i in range(n)]
 
     # Remove empty bins
@@ -191,6 +198,7 @@ def binned_plot(dataset, Y, filename='binned_plot.png', n=10, percentiles=[35, 5
     
     # Plot the expected line
     ax.plot(np.linspace(bin_centers[0],bin_centers[-1],10),np.linspace(bin_centers[0],bin_centers[-1],10),'k--')
+    
     from matplotlib.patches import Patch
     from matplotlib.lines import Line2D
     legend_elements = [Line2D([0], [0], color='b', label='Mean prediction'),
@@ -200,13 +208,13 @@ def binned_plot(dataset, Y, filename='binned_plot.png', n=10, percentiles=[35, 5
                          label='90th percentile')]
     plt.legend(handles=legend_elements)
     
-    plt.xlabel('Expected fraction')
+    plt.xlabel('Actual fraction')
     plt.ylabel('Predicted fraction')
     f.savefig(fname=filename)
     
     plt.close()
 
-    return bin_data, bin_edges
+    return bin_centers, bin_data
 
 def scatter_plot(dataset, predictions, filename):
     unbatched = dataset.unbatch()
@@ -249,21 +257,10 @@ def plot_results(model, train_data, val_data, file_ext):
     # Create binned plot
     binned_plot(val_subset, predictions, n=20, percentiles=[35,45,50], color='b', filename=f'binned_plot-{file_ext}.png')
 
-def plot_results_mode(model, train_data, val_data, file_ext):
-    train_subset = train_data.take(20)
-    val_subset = val_data.take(10) 
-    # Create scatter plots showing the spread of data
+def plot_results_mode(model, train_data, val_data, file_ext, send_to_wandb=False):
+    val_subset = val_data.take(100) 
+
     x = np.arange(0, 1, 0.001)
-    predictions = []
-    for batch in train_subset:
-        outputs = model(batch[0])
-        logps = []
-        for i in x:
-            logps.append(outputs.log_prob(i).numpy())
-        logps = np.stack(logps)
-        predictions.append(x[np.exp(logps).argmax(axis=0)])
-    predictions = np.array(predictions).flatten()
-    scatter_plot(train_subset, predictions, f'train_graph-{file_ext}.png')
     
     predictions = []
     for batch in val_subset:
@@ -274,10 +271,21 @@ def plot_results_mode(model, train_data, val_data, file_ext):
         logps = np.stack(logps)
         predictions.append(x[np.exp(logps).argmax(axis=0)])
     predictions = np.array(predictions).flatten()
-    scatter_plot(val_subset, predictions, f'val_graph-{file_ext}.png')
     
     # Create binned plot
-    binned_plot(val_subset, predictions, n=20, percentiles=[35,45,50], color='b', filename=f'binned_plot-{file_ext}.png')
+    bin_centers, bin_data = binned_plot(val_subset, predictions, n=20, percentiles=[35,45,50], color='b', filename=f'binned_plot-{file_ext}.png')
+    
+    if send_to_wandb:
+        # Just plot the central line
+        data = [[x, y] for (x, y) in zip(bin_centers, bin_data['50'])]
+        table = wandb.Table(data=data, columns=['Actual fraction', 'Predicted fraction'])
+        wandb.log(
+            {
+                'binned_plot_id': wandb.plot.line(
+                    table, 'Actual fraction', 'Predicted fraction', title='Binned validation plot'
+                )
+            }
+        )
 
 def plot_loss(jobnumbers):
     loss = []
@@ -308,23 +316,25 @@ def val_preprocess(data):
     return image
 
 def prepare_validation_data(fracs_path='/srv/scratch/mltidal/fracs_resized.npy'):
-    val_init_dataset = tfds.load('hsc_icl', split='train', data_dir='/srv/scratch/z5214005/tensorflow_datasets')
+    val_init_dataset = tfds.load('hsc_icl', split='train', data_dir='/srv/scratch/mltidal/tensorflow_datasets')
     dud_only_dataset = val_init_dataset.filter(lambda x: x['id'] < 125)
     np_val_data = dud_only_dataset.as_numpy_iterator()
     validation_imgs = sorted(np_val_data, key=lambda x: x['id'])
     validation_imgs = np.array(list(map(val_preprocess, validation_imgs)))
     # fracs_all = np.tanh(np.load(fracs_path)[0] / 400)
-    fracs_all = np.load(fracs_path)[2]
+    fracs_all = np.load(fracs_path)
+    if len(fracs_all) == 3:
+        fracs_all = fracs_all[2]
     fracs = fracs_all[~np.isnan(fracs_all)]
     validation_imgs = validation_imgs[~np.isnan(fracs_all)]
     return (validation_imgs, fracs)
 
-def test_real_data(model, file_ext, fracs_path='/srv/scratch/mltidal/fracs_resized.npy'):
+def test_real_data(model, file_ext, fracs_path='/srv/scratch/mltidal/fracs_actual.npy', send_to_wandb=False):
     validation_data = prepare_validation_data(fracs_path=fracs_path)
     # Look at the performance of the model
     validation_imgs, expected = validation_data
     # Run the model and calculate the Spearman coefficient
-    predictions = model(validation_imgs).mean().numpy().squeeze()
+    # predictions = model(validation_imgs).mean().numpy().squeeze()
     x = np.arange(0, 0.6, 0.0005)
     outputs = model(validation_imgs)
     logps = []
@@ -341,25 +351,57 @@ def test_real_data(model, file_ext, fracs_path='/srv/scratch/mltidal/fracs_resiz
     lower_errors = np.abs(predictions - x[q15s])
     upper_errors = np.abs(x[q85s] - predictions)
     # error = 0.04
-    plt.errorbar(expected, predictions, fmt='none', yerr=(lower_errors, upper_errors), alpha=0.3)
-    plt.scatter(expected, predictions)
+    sorted_idxs = np.argsort(expected)
+    binned_expected = np.array_split(expected[sorted_idxs], 5)
+    binned_predicted = np.array_split(predictions[sorted_idxs], 5)
+
+    # Calculate the median of the binned results
+    x = []
+    y = []
+    xerr_l = []
+    xerr_h = []
+    for i in range(len(binned_expected)):
+        x_med = np.median(binned_expected[i])
+        x.append(x_med)
+        y_med = np.median(binned_predicted[i])
+        y.append(y_med)
+
+        xerr_l.append(x_med - np.min(binned_expected[i]))
+        xerr_h.append(np.max(binned_expected[i]) - x_med)
+
+    plt.errorbar(expected, predictions, fmt='none', yerr=(lower_errors, upper_errors), alpha=0.2, color='gray')
+    plt.plot(expected, predictions, '.', color='gray', alpha=0.3)
+    plt.plot(x, y, 'or')
+    plt.plot(x, y, 'r')
+    plt.errorbar(x, y, fmt='none', xerr=(xerr_l, xerr_h), color='red')
     maxval = np.max([expected, predictions])
     plt.plot([0, maxval], [0, maxval], 'k--')
-    plt.xlabel('Expected')
-    plt.ylabel('Predicted')
+    plt.xlabel('Actual fraction')
+    plt.ylabel('Predicted fraction')
+
     plt.savefig(f'test_graph-{file_ext}.png')
     plt.close()
-    # Print the loss
+    # Print the result
     print(f'MAE = {np.mean(np.abs(expected - predictions))}')
     print(pearsonr(expected, predictions))
 
-def load_model(model_name=None):
+    if send_to_wandb:
+        data = [[x, y] for (x, y) in zip(expected, predictions)]
+        table = wandb.Table(data=data, columns=['Actual', 'Predictions'])
+        wandb.log({'test_graph': wandb.plot.scatter(table, 'Actual', 'Predictions')})
+
+    return (expected, predictions)
+
+def load_model(model_name=None, lr=1e-4):
     model = ImageRegressor((224,224,1))
+    # pretrained_model = NNCLR((224,224,1), temperature=0.1, queue_size=1000)
+    # pretrained_model.load_weights('checkpoint-alldata50nobatchnorm-final.ckpt').expect_partial()
+    # model.encoder = pretrained_model.encoder
 
     negloglik = lambda y, p_y: -p_y.log_prob(y)
-    model.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-4), loss=negloglik)
+    model.compile(optimizer=keras.optimizers.Adam(learning_rate=lr), loss=negloglik)
     if model_name is not None: 
-        model.load_weights(f'checkpoints/checkpoint-sup-{model_name}.ckpt').expect_partial()
+        model.load_weights(f'checkpoint-sup-{model_name}.ckpt').expect_partial()
 
     return model
 
@@ -377,15 +419,15 @@ if __name__ == '__main__':
         'val_batch_size': 100,
         'optimizer': 'adam',
     },
-    # id='ukhgr5k6',
-    # resume='must'
+    id='2blsd9rl',
+    resume='must'
     )
 
     dataset, validation_dataset = prepare_data()
 
-    model = load_model(model_name=None)
+    model = load_model(model_name='withbkg', lr=1e-5)
 
     model = train(model, dataset, validation_dataset, epochs=100, file_ext=file_ext)
 
-    plot_results(model, dataset, validation_dataset, file_ext=file_ext)
-    test_real_data(model, file_ext)
+    plot_results_mode(model, dataset, validation_dataset, file_ext=file_ext, send_to_wandb=True)
+    test_real_data(model, file_ext, fracs_path='/srv/scratch/mltidal/fracs_manual_updated.npy', send_to_wandb=True)
