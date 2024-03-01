@@ -45,11 +45,12 @@ def background_estimate(cutout, z, cosmo, mask=None):
     box_cen = (box_size - 1) / 2.0
 
     # Create a mask to cover the internal 350 kpc
-    px_dist = cosmo.arcsec_per_kpc_proper(z) * 350 * 1/0.168
-    size = int(np.ceil(px_dist.value / box_size))
-    box = (X > x_cen - size) & (X < x_cen + size) & (Y > y_cen - size) & (Y < y_cen + size)
+    if cosmo is not None:
+        px_dist = cosmo.arcsec_per_kpc_proper(z) * 350 * 1/0.168
+        size = int(np.ceil(px_dist.value / box_size))
+        box = (X > x_cen - size) & (X < x_cen + size) & (Y > y_cen - size) & (Y < y_cen + size)
 
-    if np.count_nonzero(box == False) == 0:
+    if cosmo is None or np.count_nonzero(box == False) == 0:
         # Image is completely covered, just use the edges
         box = (X < mesh.shape[1] - 1) & (X > 0) & (Y < mesh.shape[0] - 1) & (Y > 0)
 
