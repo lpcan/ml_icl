@@ -17,6 +17,10 @@ stddev = 0.017359
 def stretch(img):
     return np.arcsinh(np.clip(img, a_min=0.0, a_max=10.0) / stddev)
 
+def k_corr(z):
+    # Equation for LRGs from Chilingarian+2010
+    return 0.710579*z + 10.1949*z**2 - 57.0378*z**3 + 133.141*z**4 - 99.9271*z**5
+
 def get_member_locs(idx, merged, cutout_shape):
     # Get cluster location
     cluster_ra = merged[merged['ID'] == idx]['RA_cl'][0]
@@ -46,7 +50,7 @@ def inject_icl(cutout_id, cutouts, z, seg_threshold=25):
     
     cutout = cutouts[str(cutout_id)]['HDU0']['DATA']
 
-    sb_threshold = seg_threshold + 10 * np.log10(1+z) # Calculate mask threshold at this z
+    sb_threshold = seg_threshold + 10 * np.log10(1+z) + k_corr(z) # Calculate mask threshold at this z
     threshold = 10**(-0.4*(sb_threshold - 2.5*np.log10(63095734448.0194) - 5.*np.log10(0.168))) # Convert to counts
 
     # Some convoluted stuff so the central blob is not over or undersegmented
@@ -57,9 +61,6 @@ def inject_icl(cutout_id, cutouts, z, seg_threshold=25):
     watershed_labels = skimage.segmentation.watershed(-distance, markers, mask=(labels > 0))
     # Need to renumber watershed labels to prevent two different objects with same label
     labels = np.where(watershed_labels > 0, watershed_labels + np.max(labels), labels)
-
-    sb_threshold = seg_threshold + 10 * np.log10(1+z) # Calculate mask threshold at this z
-    threshold = 10**(-0.4*(sb_threshold - 2.5*np.log10(63095734448.0194) - 5.*np.log10(0.168))) # Convert to counts
 
     # Figure out what to use as r_eff
     bright_parts = (cutout > threshold)
@@ -162,8 +163,8 @@ def inject_icl(cutout_id, cutouts, z, seg_threshold=25):
     return result
 
 if __name__ == '__main__':
-    cutouts = h5py.File('/srv/scratch/z5214005/lrg_cutouts_dud_resized.hdf')
-    tbl = ascii.read('/srv/scratch/z5214005/lrgs_dud_sampled.tbl')
+    cutouts = h5py.File('/srv/scratch/z5214005/lrg_cutouts_resized.hdf')
+    tbl = ascii.read('/srv/scratch/z5214005/lrgs_sampled.tbl')
 
     # # Load the cluster member catalogue
     # members = ascii.read('data/raw/camira_s20a_wide_member.dat', 
@@ -173,7 +174,7 @@ if __name__ == '__main__':
     # merged = join(members, tbl, keys_left=['RA_cl', 'Dec_cl'], keys_right=['RA [deg]', 'Dec [deg]'])
     # merged = merged['ID', 'Name', 'RA_cl', 'Dec_cl', 'z_cl_1', 'RA', 'Dec']
 
-    generated_data = h5py.File('/srv/scratch/mltidal/generated_data_deep_v2.hdf', 'w')
+    generated_data = h5py.File('/srv/scratch/mltidal/generated_data_kcorr.hdf', 'w')
     # fracs = []
     # finder = SourceFinder(npixels=20, progress_bar=False, nlevels=8)
 
@@ -182,7 +183,7 @@ if __name__ == '__main__':
         cutout_id = tbl['new_ids'][num]
         z = tbl['z'][tbl['new_ids'] == cutout_id]
 
-        result = inject_icl(cutout_id, cutouts, z)
+        result = inject_icl(cutout_id, cutouts, z, seg_threshold=26)
 
         if result is None:
             continue
