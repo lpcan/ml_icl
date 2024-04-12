@@ -85,7 +85,7 @@ def download_all(tbl, overwrite=False):
         # Crop and resize everything
         centre = cutout.shape[0] // 2, cutout.shape[1] // 2
         mask = bad_mask[centre[0]-358:centre[0]+358,centre[1]-358:centre[1]+358]
-        mask = skimage.transform.resize(bad_mask, (224,224))
+        mask = skimage.transform.resize(mask, (224,224))
         bkg = bkg[centre[0]-358:centre[0]+358,centre[1]-358:centre[1]+358]
         bkg = skimage.transform.resize(bkg, (224,224))
 
@@ -105,7 +105,8 @@ def download_all(tbl, overwrite=False):
                 resized_cutouts[f'{new_key}/MASK'] = mask.copy()
         
         # If we are almost out of time, make sure to close the file properly
-        if (time.time() - start_time) > (11 * 60 * 60):
+        print((time.time() - start_time) / (60 * 60))
+        if (time.time() - start_time) > (10 * 60 * 60):
             print('Out of time')
             resized_cutouts.close()
             sys.exit(0) 
