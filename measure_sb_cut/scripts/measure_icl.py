@@ -122,8 +122,8 @@ def get_member_locs(idx, merged, cutout_shape):
     
     return (x_locs, y_locs)
 
-def counts2sb(counts, z):
-    return 2.5 * np.log10(63095734448.0194 / counts) + 5 * np.log10(0.168) - 10 * np.log10(1+z)
+def counts2sb(counts, z, kcorr = 0):
+    return 2.5 * np.log10(63095734448.0194 / counts) + 5 * np.log10(0.168) - 10 * np.log10(1+z) - kcorr
 
 def sb2counts(sb): # without reaccounting for dimming
     return 10**(-0.4*(sb - 2.5*np.log10(63095734448.0194) - 5.*np.log10(0.168)))

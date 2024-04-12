@@ -4,12 +4,14 @@ from data.scripts.display_cutouts import stretch
 from astropy.cosmology import FlatLambdaCDM
 from astropy.convolution import Gaussian2DKernel, convolve
 from astropy.io import ascii
-from astropy.stats import sigma_clipped_stats
+from astropy.stats import sigma_clipped_stats, mad_std
 import h5py
 import numpy as np
 from photutils.background import Background2D
-from photutils.segmentation import SourceFinder
+from photutils.segmentation import detect_sources
 import scipy
+from scipy.interpolate import bisplrep, bisplev
+from scipy.ndimage import zoom
 from skimage.morphology import binary_closing
 
 import multiprocessing as mp
@@ -19,106 +21,95 @@ import sys
 
 import skimage
 
-def calc_icl_frac(cutout, z):
-    # Background estimate
-    # bkg = measure_icl.background_estimate(cutout, zs[key], cosmo)
-    bkg_subtracted = cutout# - bkg
+def k_corr(z):
+    # Equation for LRGs from Chilingarian+2010
+    return 0.710579*z + 10.1949*z**2 - 57.0378*z**3 + 133.141*z**4 - 99.9271*z**5
 
-    # Segment the image
-    cold_labels = measure_icl.create_cold_labels(cutout, np.zeros(cutout.shape, dtype=bool), kernel_size=2, npixels=10)
-    if cold_labels is None:
-        cold_labels = np.zeros_like(cutout)
+def background_estimate(cutout, bad_mask):
+    box_size = 224 // 14
+    bkg_initial = Background2D(cutout, box_size=box_size, mask=bad_mask)
+    mesh = bkg_initial.background_mesh 
+    
+    Y, X = np.ogrid[:mesh.shape[0], :mesh.shape[1]]
 
-    # Create cold mask
-    cold_mask = measure_icl.enlarge_mask(cold_labels, sigma=0.5)
+    box = (X < mesh.shape[1]  - 1) & (X > 0) & (Y < mesh.shape[0]) & (Y > 0)
 
-    # Create the "member mask"
-    mid = (cutout.shape[0] // 2, cutout.shape[1] // 2)
-    # Remove the central blob from the cold labels
-    central_blob = cold_labels[mid[0], mid[1]]
-    unblobbed = ((cold_labels != 0) & (cold_labels != central_blob)) * cold_labels
-    unblobbed = measure_icl.enlarge_mask(unblobbed, sigma=0.66) # Enlarge this mask
-    # Calculate new, smaller masks for central galaxies
-    threshold = measure_icl.sb2counts(25 + 10 * np.log10(1 + z))
-    finder = SourceFinder(20, progress_bar=False)
-    deblended = finder(bkg_subtracted, threshold)
-    centrals_newlabels = deblended.data * (cold_labels == central_blob)
-    # Renumber
-    centrals_newlabels = (np.max(cold_labels) + centrals_newlabels) * centrals_newlabels.astype(bool)
-    # Combine to create our new mask
-    combined_labels = unblobbed + centrals_newlabels
+    vals = mesh[~box]
+
+    box_square = np.argwhere(~box)
+    tck = bisplrep(*box_square.T, vals)
+    znew = bisplev(np.arange(14), np.arange(14), tck)
+    bkg = zoom(znew, np.array(cutout.shape) / np.array([14, 14]), mode='reflect')
+
+    return bkg
+
+def calc_icl_frac(cutout, bad_mask, z):
+    if bad_mask[112,112]:
+        # Bright star mask extends over the centre of the image, get rid of it
+        bad_mask = np.zeros_like(bad_mask, dtype=bool) 
+
+    # Measure and subtract the background
+    bkg = background_estimate(cutout, np.zeros_like(bad_mask, dtype=bool))
+    cutout = cutout - bkg
+
+    cutout = cutout * ~bad_mask
+
+    set_threshold = 26
+    threshold = measure_icl.sb2counts(set_threshold + 10 * np.log10(1+z) + k_corr(z))
+    segm = detect_sources(cutout, threshold=threshold, npixels=10)
+    new_labels = segm.data
 
     # Unsharp mask the image for hot mask creation
-    kernel = Gaussian2DKernel(2) 
-    conv_img = convolve(np.array(cutout), kernel)
+    kernel = Gaussian2DKernel(2)
+    conv_img = convolve(cutout, kernel)
     unsharp = cutout - conv_img
 
     # Create hot mask
     hot_mask_bkg = Background2D(unsharp, box_size=16).background
-    combined_mask = (combined_labels > 0)
+    combined_mask = (new_labels > 0)
     hot_labels = measure_icl.create_hot_labels(unsharp, combined_mask, background=hot_mask_bkg, npixels=3)
-    hot_mask = measure_icl.enlarge_mask(hot_labels, sigma=0.3)
+    hot_mask = (hot_labels > 0)
 
-    # Get the BCG label
-    bcg_label = combined_labels[mid[0], mid[1]]
-
-    # Coordinates of points that are part of the BCG
-    pts = np.array(np.argwhere(combined_labels == bcg_label))
-
-    # Find points that are furthest apart
-    candidates = pts[scipy.spatial.ConvexHull(pts).vertices]
-    dist_mat = scipy.spatial.distance_matrix(candidates, candidates)
-    i, j = np.unravel_index(dist_mat.argmax(), dist_mat.shape)
-    pt1 = candidates[i]
-    pt2 = candidates[j]
-
-    size = np.sqrt((pt1[0] - pt2[0])**2 + (pt1[1] - pt2[1])**2)
-
-    # Make sure that the radius is >=100kpc
-    # radius = np.max((size, cosmo.arcsec_per_kpc_proper(zs[num]).value * 100 * 1/0.168))
-    radius = size * 1.5
+    # Calculate 220kpc
+    cosmo = FlatLambdaCDM(H0=70, Om0=0.3)
+    radius = ((cosmo.arcsec_per_kpc_proper(z) * 220 / 0.168) / (715 / 224)).value
 
     # Generate the mask
-    centre = (cutout.shape[1] // 2, cutout.shape[0] // 2)
+    centre = (112, 112)
     Y, X = np.ogrid[:cutout.shape[0], :cutout.shape[1]]
-    dist_from_centre = np.sqrt((X-centre[0])**2 + (Y-centre[1])**2)
+    dist_from_centre = np.sqrt((X - centre[0])**2 + (Y - centre[1])**2)
     circ_mask = dist_from_centre <= radius
 
-    # Get the member mask
-    member_mask = ((centrals_newlabels > 0) & (circ_mask > 0)) | (centrals_newlabels == 0)
-    non_member_mask = ~member_mask
-    non_member_mask = non_member_mask + hot_mask + unblobbed
-    member_mask = ~non_member_mask
-
     # Calculate surface brightness limit
-    _, _, stddev = sigma_clipped_stats(bkg_subtracted)
+    _, _, stddev = sigma_clipped_stats(cutout, mask=bad_mask) 
     sb_lim = -2.5 * np.log10(3 * stddev/(0.168 * 10)) + 2.5 * np.log10(63095734448.0194)
 
     # Convert image from counts to surface brightness
     np.seterr(invalid='ignore', divide='ignore')
-    sb_img = measure_icl.counts2sb(bkg_subtracted, 0)
+    sb_img = measure_icl.counts2sb(cutout, z, k_corr(z))
 
     # Mask values below surface brightness limit
     sb_img[sb_img >= sb_lim] = np.nan
 
     # Mask above the surface brightness threshold
-    threshold = 25 + 10 * np.log10(1 + z)
+    threshold = set_threshold
     mask = sb_img >= threshold
-    
+
     # Close the mask
-    mask = binary_closing(mask)
+    # mask = binary_closing(mask)
 
     # Convert the SB image back to counts
-    counts_img = measure_icl.sb2counts(sb_img) 
+    counts_img = measure_icl.sb2counts(sb_img)
 
-    # Close the nans to try and get rid of the noise that contributes to the ICL?
-    nans = np.isnan(counts_img)
-    nans = binary_closing(nans)
+    # Close the nans to try and get rid of the noise that contributes to the ICL
+    nans = np.isnan(counts_img) 
+    # nans = binary_closing(nans) 
     not_nans = ~nans
 
-    # Display the final image
-    masked_img = counts_img * member_mask * circ_mask * not_nans
+    # Get the final image
+    masked_img = counts_img * circ_mask * not_nans * ~hot_mask
 
+    # Calculate the values
     icl = np.nansum(masked_img * mask)
     total = np.nansum(masked_img)
 
@@ -127,21 +118,20 @@ def calc_icl_frac(cutout, z):
 def run_requested_keys(args):
     keys, length, zs, new_ids = args
 
-    cutouts = h5py.File('/srv/scratch/mltidal/generated_data_deep_v2.hdf')
-    # cutouts = h5py.File('/srv/scratch/z5214005/hsc_icl/cutouts.hdf')
+    cutouts = h5py.File('/srv/scratch/mltidal/generated_data_kcorr.hdf')
+    masks = h5py.File('/srv/scratch/mltidal/lrg_bkg+mask_resized.hdf')
 
     # Find the shared memory and create a numpy array interface
     shmem = SharedMemory(name=f'iclbuf', create=False)
     fracs = np.ndarray((3, int(length/3)), buffer=shmem.buf, dtype=np.float64)
 
-    # Parameters
-    cosmo = FlatLambdaCDM(H0=68.4, Om0=0.301)
-
     for key in keys: 
         cutout = np.array(cutouts[str(new_ids[key])]['HDU0']['DATA'])
+        bad_mask = np.array(masks[str(new_ids[key])]['MASK']).astype(bool)
+
         z = zs[key]
 
-        icl, total, frac = calc_icl_frac(cutout, z)
+        icl, total, frac = calc_icl_frac(cutout, bad_mask, z)
 
         fracs[0,key] = icl
         fracs[1,key] = total
@@ -196,10 +186,10 @@ def calc_icl_frac_parallel(keys, zs):
     return result
 
 if __name__ == '__main__':
-    tbl = ascii.read('/srv/scratch/z5214005/lrgs_dud_sampled.tbl')
+    tbl = ascii.read('/srv/scratch/z5214005/lrgs_sampled.tbl')
     zs = tbl['z']
     new_ids = tbl['new_ids']
 
     fracs = calc_icl_frac_parallel(new_ids, zs)
 
-    np.save('/srv/scratch/mltidal/fracs_gendata_deepv2.npy', fracs)
+    np.save('/srv/scratch/mltidal/fracs_gendata_kcorr.npy', fracs)
