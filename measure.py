@@ -192,4 +192,4 @@ if __name__ == '__main__':
 
     fracs = calc_icl_frac_parallel(new_ids, zs)
 
-    np.save('/srv/scratch/mltidal/fracs_gendata_kcorr.npy', fracs)
+    np.save('test_fracs.npy', fracs)
