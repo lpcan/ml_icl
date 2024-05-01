@@ -114,7 +114,7 @@ def train(model, train_data, val_data, epochs=100, file_ext=''):
         save_weights_only=True
     )
     stop_callback = keras.callbacks.EarlyStopping(monitor='val_loss', patience=25)
-    lr_callback = keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.1, patience=10, verbose=1, min_lr=1e-6)
+    lr_callback = keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.1, patience=10, verbose=1, min_lr=1e-5)
     train_history = model.fit(train_data, validation_data=val_data, 
                               epochs=epochs, 
                               callbacks=[
@@ -401,7 +401,7 @@ def load_model(model_name=None, lr=1e-4):
     negloglik = lambda y, p_y: -p_y.log_prob(y)
     model.compile(optimizer=keras.optimizers.Adam(learning_rate=lr), loss=negloglik)
     if model_name is not None: 
-        model.load_weights(f'checkpoint-sup-{model_name}.ckpt').expect_partial()
+        model.load_weights(f'checkpoints/checkpoint-sup-{model_name}.ckpt').expect_partial()
 
     return model
 
@@ -419,15 +419,15 @@ if __name__ == '__main__':
         'val_batch_size': 100,
         'optimizer': 'adam',
     },
-    id='2blsd9rl',
-    resume='must'
+    # id='5mz89c5o', # resume wandb run
+    # resume='must'
     )
 
     dataset, validation_dataset = prepare_data()
 
-    model = load_model(model_name='withbkg', lr=1e-5)
+    model = load_model(model_name=None, lr=1e-4)
 
-    model = train(model, dataset, validation_dataset, epochs=100, file_ext=file_ext)
+    model = train(model, dataset, validation_dataset, epochs=90, file_ext=file_ext)
 
     plot_results_mode(model, dataset, validation_dataset, file_ext=file_ext, send_to_wandb=True)
-    test_real_data(model, file_ext, fracs_path='/srv/scratch/mltidal/fracs_manual_updated.npy', send_to_wandb=True)
+    test_real_data(model, file_ext, fracs_path='/srv/scratch/mltidal/fracs_manual_kcorr07.npy', send_to_wandb=True)

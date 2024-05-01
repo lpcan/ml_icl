@@ -112,7 +112,7 @@ if __name__=='__main__':
     splits = np.array_split(idxs, k)
 
     # Get the original predictions
-    with open(f'/srv/scratch/mltidal/finetuning_results/resnet50otherlsb-final_exp.pkl', 'rb') as fp:
+    with open(f'/srv/scratch/mltidal/finetuning_results/resnet50otherlsb-final.pkl', 'rb') as fp:
         results, err_l, err_h = pickle.load(fp)
     
     results = np.array([i for row in results for i in row])

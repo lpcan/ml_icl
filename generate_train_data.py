@@ -18,8 +18,8 @@ def stretch(img):
     return np.arcsinh(np.clip(img, a_min=0.0, a_max=10.0) / stddev)
 
 def k_corr(z):
-    # Equation for LRGs from Chilingarian+2010
-    return 0.710579*z + 10.1949*z**2 - 57.0378*z**3 + 133.141*z**4 - 99.9271*z**5
+    # Equation from Chilingarian et al. assuming g-r colour of 0.7
+    return 1.111*z - 1.101*z**2 - 75.050*z**3 + 295.888*z**4 - 295.390*z**5
 
 def get_member_locs(idx, merged, cutout_shape):
     # Get cluster location
@@ -46,33 +46,66 @@ def get_member_locs(idx, merged, cutout_shape):
     
     return (x_locs, y_locs)
 
-def create_profile(cutout, bright_parts, labels, label, threshold, z, central=False):
-    # Find centre of blob
-    blob = bright_parts * (labels == label)
-    coords = np.where(blob == 1)
+def inject_icl(cutout_id, cutouts, z, seg_threshold=25):
+    
+    cutout = cutouts[str(cutout_id)]['HDU0']['DATA']
+
+    sb_threshold = seg_threshold + 10 * np.log10(1+z) + k_corr(z) # Calculate mask threshold at this z
+    threshold = 10**(-0.4*(sb_threshold - 2.5*np.log10(63095734448.0194) - 5.*np.log10(0.168))) # Convert to counts
+
+    # Some convoluted stuff so the central blob is not over or undersegmented
+    labels = detect_sources(cutout, threshold, npixels=20).data
+    eroded = skimage.morphology.binary_erosion((labels > 0), np.ones((3,3)))
+    markers, _ = scipy.ndimage.label(eroded)
+    distance = scipy.ndimage.distance_transform_edt(labels > 0)
+    watershed_labels = skimage.segmentation.watershed(-distance, markers, mask=(labels > 0))
+    # Need to renumber watershed labels to prevent two different objects with same label
+    labels = np.where(watershed_labels > 0, watershed_labels + np.max(labels), labels)
+
+    # Figure out what to use as r_eff
+    bright_parts = (cutout > threshold)
+
+    centre = (cutout.shape[0] // 2, cutout.shape[1] // 2)
+    central_blob = bright_parts * (labels == labels[centre[0], centre[1]])
+    if np.sum(central_blob) == 0:
+        return None
+
+    # Update estimation of central blob centroid
+    coords = np.where(central_blob == 1)
     centre = (int(np.sum(coords[0]) / coords[0].shape), int(np.sum(coords[1]) / coords[1].shape))
+    
+    # # Find the cluster members in the image
+    # x_locs, y_locs = get_member_locs(num, merged, cutout.shape)
+    # c_members = labels[y_locs.astype(int), x_locs.astype(int)]
+    # member_mask = np.isin(labels, c_members) & labels.astype(bool)
+    member_mask = central_blob 
+
+    # Expand the masks of non central galaxies
+    non_central_galaxies = bright_parts * ~central_blob 
+    kernel = Gaussian2DKernel(7) # Large ish kernel
+    non_central_blurred = binary_opening(non_central_galaxies) # Erase tiny bright parts (get rid of specks in ICL area)
+    non_central_blurred = convolve(non_central_blurred, kernel) # Expand masks
+    # Put just the blurred edges into the original mask
+    non_central_blurred = np.where(non_central_galaxies | central_blob, non_central_galaxies, non_central_blurred)
+
+    final_bright_parts = non_central_galaxies + central_blob
 
     # Figure out what r_eff of the profile should be
-    opened_blob = binary_opening(blob, np.ones((2,2)))
+    opened_blob = binary_opening(central_blob, np.ones((2,2)))
+    # labelled_blob = skimage.measure.label(opened_blob)
+    # opened_blob = opened_blob * (labelled_blob == labelled_blob[centre[0], centre[1]])
 
-    if np.sum(opened_blob) == 0:
-        return np.zeros_lik(cutout), (0,0,0,0)
-    
     edges = scipy.spatial.ConvexHull(np.argwhere(opened_blob)) # Convex hull of central blob
 
     distances = scipy.spatial.distance.cdist([centre], np.argwhere(opened_blob)[edges.vertices])[0] # Distances to edges of shape
-
-    if central:
-        quantile = 1
-    else:
-        quantile = 0.25
+    
+    quantile = 1
     size_frac = 10
-
+    
     # Try with these parameters, but for very irregularly shaped galaxies, r_eff
     # may need to be more conservative
     while size_frac > 8 and quantile >= 0:
         r_eff = np.quantile(distances, quantile)
-        r_eff = np.random.uniform(0.25*r_eff, r_eff)
 
         # Generate some random parameters for the profile
         amplitude = threshold
@@ -85,81 +118,36 @@ def create_profile(cutout, bright_parts, labels, label, threshold, z, central=Fa
         x,y = np.meshgrid(np.arange(cutout.shape[1]), np.arange(cutout.shape[0]))
 
         icl_img = np.clip(model(x,y), a_min=None, a_max=threshold)
-        icl_img = np.where(bright_parts, 0, icl_img)
+        # icl_img = np.where(central_blob, 0, icl_img)
+        icl_img = np.where(final_bright_parts, 0, icl_img)
 
+        # Calculate the new artificial ICL fraction
         sb_limit = 30.2 + 10 * np.log10(1+z) # Calculate the sb limit
         limit = 10**(-0.4*(sb_limit - 2.5*np.log10(63095734448.0194) - 5.*np.log10(0.168))) # Convert to counts
+        icl = np.sum(icl_img[icl_img > limit])
 
-        size_frac = (np.sum(icl_img > limit) / np.sum(blob))
-        quantile -= 0.25
-        if not central:
-            break
-
-    return icl_img, (amplitude, ellip, theta, r_eff)
-
-def inject_icl(cutout_id, cutouts, z, seg_threshold=25):
-    
-    cutout = cutouts[str(cutout_id)]['HDU0']['DATA']
-
-    sb_threshold = seg_threshold + 10 * np.log10(1+z) + k_corr(z) # Calculate mask threshold at this z
-    threshold = 10**(-0.4*(sb_threshold - 2.5*np.log10(63095734448.0194) - 5.*np.log10(0.168))) # Convert to counts
-
-    # Some convoluted stuff so the central blob is not over or undersegmented
-    og_labels = detect_sources(cutout, threshold, npixels=20).data
-    eroded = skimage.morphology.binary_erosion((og_labels > 0), np.ones((3,3)))
-    markers, _ = scipy.ndimage.label(eroded)
-    distance = scipy.ndimage.distance_transform_edt(og_labels > 0)
-    watershed_labels = skimage.segmentation.watershed(-distance, markers, mask=(og_labels > 0))
-    # Need to renumber watershed labels to prevent two different objects with same label
-    labels = np.where(watershed_labels > 0, watershed_labels + np.max(og_labels), og_labels)
-
-    # Figure out what to use as r_eff
-    bright_parts = (cutout > threshold)
-
-    centre = (cutout.shape[0] // 2, cutout.shape[1] // 2)
-    central_blob = bright_parts * (labels == labels[centre[0], centre[1]])
-    if np.sum(central_blob) == 0:
-        return None
-
-    lsb_img = np.zeros_like(cutout)
-    for label in np.unique(watershed_labels+np.max(og_labels)):
-        if label == 0 or (np.sum(labels == label) < 250 and label != labels[centre[0], centre[1]]):
-            continue
-        if label == labels[centre[0], centre[1]]:
-            icl_img, (amplitude, ellip, theta, r_eff) = create_profile(cutout, bright_parts, labels, label, threshold, z, central=True)
-        else:
-            icl_img, _ = create_profile(cutout, bright_parts, labels, label, threshold, z)
+        _, med, _ = sigma_clipped_stats(cutout)
+        total = np.sum(((np.array(cutout) - med) * central_blob) + icl_img)
         
-        lsb_img += icl_img
-    
-    lsb_img = np.clip(lsb_img, a_min=None, a_max=threshold)
-
-    # Expand the masks of non central galaxies
-    non_central_galaxies = bright_parts * ~central_blob 
-    kernel = Gaussian2DKernel(7) # Large ish kernel
-    non_central_blurred = binary_opening(non_central_galaxies) # Erase tiny bright parts (get rid of specks in ICL area)
-    non_central_blurred = convolve(non_central_blurred, kernel) # Expand masks
-    # Put just the blurred edges into the original mask
-    non_central_blurred = np.where(non_central_galaxies | central_blob, non_central_galaxies, non_central_blurred)
-
-    final_bright_parts = non_central_galaxies + central_blob
-
-    # Calculate the new artificial ICL fraction
-    sb_limit = 30.2 + 10 * np.log10(1+z) # Calculate the sb limit
-    limit = 10**(-0.4*(sb_limit - 2.5*np.log10(63095734448.0194) - 5.*np.log10(0.168))) # Convert to counts
-    icl = np.sum(lsb_img[lsb_img > limit])
-
-    _, med, _ = sigma_clipped_stats(cutout)
-    total = np.sum(((np.array(cutout) - med) * central_blob) + lsb_img)
+        size_frac = (np.sum(icl_img > limit) / np.sum(central_blob))
+        quantile -= 0.25
     
     # Generate the final image
     # Add some noise to the ICL 
-    std = 0.006
+    std = mad_std(cutout * ~bright_parts) # Standard deviation of the background (+icl)
     noise = np.random.normal(loc=0, scale=std, size=cutout.shape)
-    noisy_icl = lsb_img + noise
+    noisy_icl = icl_img + noise
 
+    # Add the ICL image to the non bright parts
+    bkg = cutout * ~final_bright_parts
+    # sb_limit = 29 + 10 * np.log10(1+z) # Calculate the sb limit
+    # limit = 10**(-0.4*(sb_limit - 2.5*np.log10(63095734448.0194) - 5.*np.log10(0.168))) # Convert to counts
+    # bkg = bkg * (bkg > limit)
+    icl_img_norm = icl_img / threshold # this version goes between 0 and 1
+    bkg = bkg * (1 - icl_img_norm) # fade out when the ICL is there. Might need this to be a mask instead
+    icl_img = bkg + noisy_icl
     # Add to the bright parts
-    img = (cutout * final_bright_parts) + noisy_icl
+    img = (cutout * final_bright_parts) + icl_img
 
     img = img.astype('<f4')
 
@@ -186,7 +174,7 @@ if __name__ == '__main__':
     # merged = join(members, tbl, keys_left=['RA_cl', 'Dec_cl'], keys_right=['RA [deg]', 'Dec [deg]'])
     # merged = merged['ID', 'Name', 'RA_cl', 'Dec_cl', 'z_cl_1', 'RA', 'Dec']
 
-    generated_data = h5py.File('/srv/scratch/mltidal/generated_data_injectotherlsb.hdf', 'w')
+    generated_data = h5py.File('/srv/scratch/mltidal/generated_data_kcorr07.hdf', 'w')
     # fracs = []
     # finder = SourceFinder(npixels=20, progress_bar=False, nlevels=8)
 
@@ -195,7 +183,7 @@ if __name__ == '__main__':
         cutout_id = tbl['new_ids'][num]
         z = tbl['z'][tbl['new_ids'] == cutout_id]
 
-        result = inject_icl(cutout_id, cutouts, z, seg_threshold=26)
+        result = inject_icl(cutout_id, cutouts, z, seg_threshold=25)
 
         if result is None:
             continue
