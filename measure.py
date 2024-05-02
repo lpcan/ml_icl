@@ -20,6 +20,10 @@ import sys
 
 import skimage
 
+def k_corr(z):
+    # Equation from Chilingarian et al. assuming g-r colour of 0.7
+    return 1.111*z - 1.101*z**2 - 75.050*z**3 + 295.888*z**4 - 295.390*z**5
+
 def calc_icl_frac(cutout, z):
     # Background estimate
     # bkg = measure_icl.background_estimate(cutout, zs[key], cosmo)
@@ -27,7 +31,7 @@ def calc_icl_frac(cutout, z):
 
     mid = (cutout.shape[0] // 2, cutout.shape[1] // 2)
     # Calculate new, smaller masks for central galaxies
-    threshold = measure_icl.sb2counts(25 + 10 * np.log10(1 + z))
+    threshold = measure_icl.sb2counts(25 + 10 * np.log10(1 + z) + k_corr(z))
     deblended = detect_sources(bkg_subtracted, threshold=threshold, npixels=10)
     # Combine to create our new mask
     combined_labels = deblended.data
@@ -69,10 +73,6 @@ def calc_icl_frac(cutout, z):
     circ_mask = dist_from_centre <= radius
 
     # Get the member mask
-    # member_mask = ((combined_labels > 0) & (circ_mask > 0)) | (combined_labels == 0)
-    # non_member_mask = ~member_mask
-    # non_member_mask = non_member_mask + hot_mask
-    # member_mask = ~non_member_mask
     member_mask = circ_mask
 
     # Calculate surface brightness limit
@@ -188,4 +188,4 @@ if __name__ == '__main__':
 
     fracs = calc_icl_frac_parallel(new_ids, zs)
 
-    np.save('test_fracs.npy', fracs)
+    np.save('/srv/scratch/mltidal/fracs_gendata_kcorrbasic.npy', fracs)
