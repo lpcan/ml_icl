@@ -4,36 +4,52 @@ import numpy as np
 from scipy.stats import pearsonr
 import skimage
 from tensorflow import keras
+import tensorflow as tf
 import pickle
 
 from supervised_model import ImageRegressor
 
-MODEL_VERSION = 'kcorr07gendata-final'
+MODEL_VERSION = '300-final'
+EPOCHS = 100
+FRACS_PATH = '/srv/scratch/mltidal/fracs_manual_300kpc.npy'
+IMAGES_PATH = 'badmaskimgs_300kpc.npy'
 
 def flatten(list):
     return np.array([i for row in list for i in row])
 
 def prepare_data():
     # Create the finetuning dataset
-    fracs = np.load('/srv/scratch/mltidal/fracs_manual_kcorr07.npy')[2]
+    fracs = np.load(FRACS_PATH)[2]
     zeros = np.where(fracs == 0)[0]
     if len(zeros) > 0:
         fracs[zeros] = 0.00001
 
     not_nans = np.where(~np.isnan(fracs))[0]
 
-    # Prepare the images
-    cutouts = h5py.File('/srv/scratch/z5214005/cutouts.hdf')
-    images = []
-    for idx in not_nans:
-        cutout = np.array(cutouts[str(idx)]['HDU0']['DATA'])
-        img = skimage.transform.resize(cutout, (224,224))
-        img = np.clip(img, a_min=0, a_max=10)
-        img = np.arcsinh(img / 0.017359)
-        img = np.expand_dims(img, -1)
-        images.append(img)
+    if IMAGES_PATH is None:
+        # Prepare the images
+        cutouts = h5py.File('/srv/scratch/z5214005/cutouts.hdf')
+        cutouts_550 = h5py.File('/srv/scratch/z5214005/cutouts_550.hdf')
+        BAD = 1
+        NO_DATA = (1 << 8)
+        BRIGHT_OBJECT = (1 << 9)
+        images = []
+        for idx in not_nans:
+            cutout = np.array(cutouts[str(idx)]['HDU0']['DATA'])
+            big_mask = (np.array(cutouts_550[str(idx)]['HDU1']['DATA']).astype(int) & (BAD | NO_DATA | BRIGHT_OBJECT))
+            centre = big_mask.shape[0] // 2, big_mask.shape[1] // 2
+            mask = big_mask[centre[0]-358:centre[0]+358,centre[1]-358:centre[1]+358]
+            mask = skimage.transform.resize(mask, (224,224))
+            img = skimage.transform.resize(cutout, (224,224))
+            img = np.clip(img, a_min=0, a_max=10)
+            img = np.arcsinh(img / 0.017359) * ~(mask > 0)
+            img = np.expand_dims(img, -1)
+            images.append(img)
 
-    images = np.array(images) 
+        images = np.array(images)
+    else:
+        images = np.load(IMAGES_PATH)
+        images = images[not_nans] 
 
     fracs = fracs[not_nans]
 
@@ -43,21 +59,70 @@ def create_model():
     # Create the model
     finetune_model = ImageRegressor((224,224,1))
     negloglik = lambda y, p_y: -p_y.log_prob(y)
-    optimizer = keras.optimizers.Adam(learning_rate=1e-6)
+    mae = lambda y, p_y: tf.math.abs(y - p_y.mean())
+    optimizer = keras.optimizers.Adam(learning_rate=1e-7)
     finetune_model.compile(optimizer=optimizer, loss=negloglik)
     finetune_model.load_weights(f'checkpoints/checkpoint-sup-{MODEL_VERSION}.ckpt').expect_partial()
 
     # Freeze the entire model other than the dense layers
-    for layer in finetune_model._flatten_layers():
-        lst_of_sublayers = list(layer._flatten_layers())
+    # for layer in finetune_model._flatten_layers():
+    #     lst_of_sublayers = list(layer._flatten_layers())
 
-        if len(lst_of_sublayers) == 1: # leaves of the model
-            if layer.name in ['dense_1', 'dense_2']:
-                layer.trainable = True
-            else:
-                layer.trainable = False
+    #     if len(lst_of_sublayers) == 1: # leaves of the model
+    #         if layer.name in ['dense_1', 'dense_2']:
+    #             layer.trainable = True
+    #         else:
+    #             layer.trainable = False
 
     return finetune_model
+    # from lora import LoraLayer, RANK, ALPHA
+    # import tensorflow_probability as tfp
+    # # Load the original model
+    # lora_model = ImageRegressor((224,224,1))
+    # negloglik = lambda y, p_y: -p_y.log_prob(y)
+    # steps = 2
+    # boundaries = [5 * steps, 50 * steps]
+    # values = [1e-7, 1e-4, 1e-5]
+    # lr_schedule = tf.keras.optimizers.schedules.PiecewiseConstantDecay(boundaries, values)
+    # lora_model.compile(optimizer=keras.optimizers.Adam(learning_rate=lr_schedule), loss=negloglik)
+    # lora_model.load_weights('checkpoint-sup-badmaskimages.ckpt').expect_partial()
+
+    # lora_model(tf.random.uniform((1, 224, 224, 1)))
+
+    # # Overwrite the original layer with the new LoRA layer
+    # output_layers = lora_model.prob_output
+    # dense_layer = output_layers.layers[0]
+
+    # new_layer = LoraLayer(
+    #     dense_layer, 
+    #     rank=RANK,
+    #     alpha=ALPHA,
+    #     trainable=True
+    # )
+
+    # num_components = dense_layer.get_config()['units'] // 3
+    # lora_model.prob_output = keras.Sequential([
+    #             new_layer,
+    #             tfp.layers.DistributionLambda(lambda t: tfp.distributions.Independent(
+    #                 tfp.distributions.MixtureSameFamily(mixture_distribution=tfp.distributions.Categorical(logits=tf.expand_dims(t[..., :num_components], -2)),
+    #                                                     components_distribution=tfp.distributions.Beta(1 + tf.nn.softplus(tf.expand_dims(t[..., num_components:2*num_components], -2)),
+    #                                                                                                 1 + tf.nn.softplus(tf.expand_dims(t[..., 2*num_components:],-2)))), 1))
+    #         ])
+
+    # # Do a forward pass to make sure we still have a valid chain of computation
+    # lora_model(tf.random.uniform((1, 224, 224, 1)))
+
+    # # Freeze the entire model other than the LoRA layers
+    # for layer in lora_model._flatten_layers():
+    #     lst_of_sublayers = list(layer._flatten_layers())
+
+    #     if len(lst_of_sublayers) == 1: # leaves of the model
+    #         if layer.name in ['lora_A', 'lora_B']:
+    #             layer.trainable = True
+    #         else:
+    #             layer.trainable = False
+    
+    # return lora_model
 
 def final_finetune():
     # Finetune on all of the data and save the final model
@@ -117,7 +182,7 @@ if __name__=='__main__':
         # lr_callback = keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.1, patience=10, verbose=1, min_lr=1e-8)
 
         # Train the model
-        finetune_model.fit(train_ds, train_labels, validation_data=(test_ds, test_labels), epochs=50)
+        finetune_model.fit(train_ds, train_labels, validation_data=(test_ds, test_labels), epochs=EPOCHS)
 
         # Evaluate the model
         finetune_model.evaluate(test_ds, test_labels)

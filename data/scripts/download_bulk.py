@@ -16,12 +16,16 @@ from unagi import hsc
 # from unagi.task import hsc_bulk_cutout
 from task import hsc_bulk_cutout
 
+from astropy.cosmology import FlatLambdaCDM
+
 # Parameters
 script_dir = os.path.dirname(__file__)
-tbl_path = '/srv/scratch/z5214005/lrgs_sampled_new.tbl' # Path relative to script directory
-half_size = 1 * u.arcmin
-output_dir = '/srv/scratch/mltidal/tmp/'
+tbl_path = '/srv/scratch/z5214005/lrgs_sampled_1405.tbl'
+dwnld_half_size = 163 * u.arcsec
+output_dir = '/srv/scratch/z5214005/tmp/'
 rerun = 'pdr2_wide'
+
+cosmo = FlatLambdaCDM(H0=70, Om0=0.3)
 
 # HSC username: locan@local
 # HSC password: ########################################
@@ -65,8 +69,9 @@ def compute_sample_weights(table=None):
 
 def create_table(size=50_000):
     # Create a list of coordinates of clusters that we want to download
-    f = fits.open(os.path.join(script_dir, '../raw/lrg_s18a_wide_sm.fits'))
+    f = fits.open(os.path.join(script_dir, '/srv/scratch/z5214005/lrg_s18a_wide_sm.fits'))
     tbl = f[1].data[f[1].data['z'] <= 0.5]
+    tbl = tbl[tbl['z'] >= 0.1]
     tbl = Table(tbl)
     tbl['old_ids'] = np.arange(len(tbl)).astype(str)
 
@@ -86,9 +91,10 @@ def create_table(size=50_000):
 
 def download_bulk(tbl, overwrite=False):
     if overwrite:
-        resized_cutouts = h5py.File('/srv/scratch/z5214005/lrg_cutouts_resized_new.hdf', 'w') # File to put all the processed cutouts into
+        input('Are you sure you want to overwrite? If not, exit now!')
+        resized_cutouts = h5py.File('/srv/scratch/z5214005/lrg_cutouts_300kpc_resized.hdf', 'w') # File to put all the processed cutouts into
     else:
-        resized_cutouts = h5py.File('/srv/scratch/z5214005/lrg_cutouts_resized_new.hdf', 'a')
+        resized_cutouts = h5py.File('/srv/scratch/z5214005/lrg_cutouts_300kpc_resized.hdf', 'a')
 
     # Remove any rows that have already been downloaded
     to_remove = []
@@ -113,7 +119,9 @@ def download_bulk(tbl, overwrite=False):
         # Download the cutouts
         sub_tbl = to_download[inds[i]:inds[i+1]]
 
-        filename = hsc_bulk_cutout(sub_tbl, cutout_size=half_size, filters='r', archive=pdr2, overwrite=True, tmp_dir=output_dir, mask=False)
+        filename = hsc_bulk_cutout(sub_tbl, cutout_size=dwnld_half_size, filters='r', 
+                                   archive=pdr2, overwrite=True, tmp_dir=output_dir, 
+                                   nproc=8, mask=True, output_dir=output_dir)
 
         # Open the HDF file, resize the cutouts to 224x224 and save into a new file
         print('Resizing batch...')
@@ -124,7 +132,21 @@ def download_bulk(tbl, overwrite=False):
                 print(f'Key {key} missing from download')
                 continue
             cutout = np.array(cutouts[str(key)]['HSC-R']['HDU0']['DATA'])
+            mask = np.array(cutouts[str(key)]['HSC-R']['HDU1']['DATA']).astype(int)
+
+            BAD = 1
+            NO_DATA = (1 << 8)
+            BRIGHT_OBJECT = (1 << 9)
+            mask = (mask & (BAD | BRIGHT_OBJECT | NO_DATA)).astype(bool)
+
+            # Crop the cutout and mask to the correct physical size
+            half_size = int(((cosmo.arcsec_per_kpc_proper(sub_tbl[j]['z']) * 300).value) / 0.168)
+            centre = cutout.shape[0] // 2, cutout.shape[1] // 2
+            mask = mask[centre[0]-half_size:centre[0]+half_size,centre[1]-half_size:centre[1]+half_size]
+            cutout = cutout[centre[0]-half_size:centre[0]+half_size,centre[1]-half_size:centre[1]+half_size]
+
             resized = skimage.transform.resize(cutout, (224,224))
+            resized_mask = skimage.transform.resize(mask, (224, 224))
             # If necessary, save multiple copies of this galaxy
             for repeat in range(sub_tbl['repeats'][j]):
                 tbl_id = sub_tbl['unique_ids'][j]
@@ -135,22 +157,15 @@ def download_bulk(tbl, overwrite=False):
                     continue
                 else:
                     resized_cutouts[f'{new_key}/HDU0/DATA'] = resized.copy()
+                    resized_cutouts[f'{new_key}/HDU1/DATA'] = resized_mask.copy()
         print('Batch resized to 224x224 cutouts')
         cutouts.close()
-
-        # Remove the temporary files
-        files = os.listdir(output_dir)
-        for file in files:
-            if os.path.isfile(os.path.join(output_dir, file)):
-                os.remove(os.path.join(output_dir, file))
-            else:
-                shutil.rmtree(os.path.join(output_dir, file)) # is a directory
 
 if __name__ == '__main__':
     if tbl_path is None:
         # No table path provided, create and save a new table
         tbl = create_table()
-        tbl.write(os.path.join(script_dir, '../processed/lrgs_sampled.tbl'), format='ascii', overwrite=True)
+        tbl.write('/srv/scratch/z5214005/lrgs_sampled_1405.tbl', format='ascii', overwrite=False)
     else:
         tbl = ascii.read(tbl_path)
 

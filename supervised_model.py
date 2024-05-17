@@ -329,8 +329,9 @@ def prepare_validation_data(fracs_path='/srv/scratch/mltidal/fracs_resized.npy')
     validation_imgs = validation_imgs[~np.isnan(fracs_all)]
     return (validation_imgs, fracs)
 
-def test_real_data(model, file_ext, fracs_path='/srv/scratch/mltidal/fracs_actual.npy', send_to_wandb=False):
-    validation_data = prepare_validation_data(fracs_path=fracs_path)
+def test_real_data(model, file_ext, fracs_path='/srv/scratch/mltidal/fracs_actual.npy', send_to_wandb=False, validation_data=None):
+    if validation_data is None:
+        validation_data = prepare_validation_data(fracs_path=fracs_path)
     # Look at the performance of the model
     validation_imgs, expected = validation_data
     # Run the model and calculate the Spearman coefficient
@@ -419,15 +420,15 @@ if __name__ == '__main__':
         'val_batch_size': 100,
         'optimizer': 'adam',
     },
-    # id='5mz89c5o', # resume wandb run
-    # resume='must'
+    id='1py3rhc4', # resume wandb run
+    resume='must'
     )
 
     dataset, validation_dataset = prepare_data()
 
-    model = load_model(model_name=None, lr=1e-4)
+    model = load_model(model_name='300-final', lr=1e-4)
 
     model = train(model, dataset, validation_dataset, epochs=90, file_ext=file_ext)
 
     plot_results_mode(model, dataset, validation_dataset, file_ext=file_ext, send_to_wandb=True)
-    test_real_data(model, file_ext, fracs_path='/srv/scratch/mltidal/fracs_manual_kcorr07.npy', send_to_wandb=True)
+    test_real_data(model, file_ext, fracs_path='notebooks/ccccc.npy', send_to_wandb=True)

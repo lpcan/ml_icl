@@ -163,8 +163,8 @@ def inject_icl(cutout_id, cutouts, z, seg_threshold=25):
     return result
 
 if __name__ == '__main__':
-    cutouts = h5py.File('/srv/scratch/z5214005/lrg_cutouts_resized.hdf')
-    tbl = ascii.read('/srv/scratch/z5214005/lrgs_sampled.tbl')
+    cutouts = h5py.File('/srv/scratch/z5214005/lrg_cutouts_300kpc_resized.hdf')
+    tbl = ascii.read('/srv/scratch/z5214005/lrgs_sampled_1405.tbl')
 
     # # Load the cluster member catalogue
     # members = ascii.read('data/raw/camira_s20a_wide_member.dat', 
@@ -174,7 +174,7 @@ if __name__ == '__main__':
     # merged = join(members, tbl, keys_left=['RA_cl', 'Dec_cl'], keys_right=['RA [deg]', 'Dec [deg]'])
     # merged = merged['ID', 'Name', 'RA_cl', 'Dec_cl', 'z_cl_1', 'RA', 'Dec']
 
-    generated_data = h5py.File('/srv/scratch/mltidal/generated_data_kcorr07.hdf', 'w')
+    generated_data = h5py.File('/srv/scratch/z5214005/generated_data_300.hdf', 'w')
     # fracs = []
     # finder = SourceFinder(npixels=20, progress_bar=False, nlevels=8)
 
