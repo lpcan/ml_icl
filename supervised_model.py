@@ -134,13 +134,21 @@ def train(model, train_data, val_data, epochs=100, file_ext=''):
     return model
 
 # Results plotting - code mostly from Francois
-def binned_plot(dataset, Y, filename='binned_plot.png', n=10, percentiles=[35, 50], ax=None, **kwargs):
-    unbatched = dataset.unbatch()
+def binned_plot(dataset, Y, ds_numpy=None, filename='binned_plot.png', n=10, percentiles=[35, 50], ax=None, **kwargs):
+    if 'color' in kwargs:
+        color = kwargs['color']
+    else:
+        color = 'b'
     
-    labels = []
-    for i, thing in enumerate(unbatched):
-        labels.append(thing[1])
-    X = np.array(labels)
+    if ds_numpy is None:
+        unbatched = dataset.unbatch()
+        
+        labels = []
+        for i, thing in enumerate(unbatched):
+            labels.append(thing[1])
+        X = np.array(labels)
+    else:
+        X = ds_numpy
 
     print(f'MAE = {np.mean(np.abs(X-Y))}')
 
@@ -186,6 +194,9 @@ def binned_plot(dataset, Y, filename='binned_plot.png', n=10, percentiles=[35, 5
     for bin_num in empty_bins[::-1]: # in reverse order so indices are still valid
         bin_centers.pop(bin_num)
 
+    # Plot the expected line
+    ax.plot(np.linspace(bin_centers[0],bin_centers[-1],10),np.linspace(bin_centers[0],bin_centers[-1],10),'k--')
+
     for p in percentiles:
         if p == 50:
             ax.plot(bin_centers, bin_data[str(p)], **kwargs)
@@ -196,21 +207,18 @@ def binned_plot(dataset, Y, filename='binned_plot.png', n=10, percentiles=[35, 5
                             alpha=0.2,
                             **kwargs)
     
-    # Plot the expected line
-    ax.plot(np.linspace(bin_centers[0],bin_centers[-1],10),np.linspace(bin_centers[0],bin_centers[-1],10),'k--')
-    
     from matplotlib.patches import Patch
     from matplotlib.lines import Line2D
-    legend_elements = [Line2D([0], [0], color='b', label='Mean prediction'),
-                       Patch(facecolor='b', alpha=0.4,
+    legend_elements = [Line2D([0], [0], color=color, label='Mean prediction'),
+                       Patch(facecolor=color, alpha=0.4,
                          label='70th percentile'),
-                       Patch(facecolor='b', alpha=0.2,
+                       Patch(facecolor=color, alpha=0.2,
                          label='90th percentile')]
-    plt.legend(handles=legend_elements)
+    ax.legend(handles=legend_elements)
     
-    plt.xlabel('Actual fraction')
-    plt.ylabel('Predicted fraction')
-    f.savefig(fname=filename)
+    ax.set_xlabel('Actual fraction')
+    ax.set_ylabel('Predicted fraction')
+    plt.savefig(fname=filename)
     
     plt.close()
 
@@ -331,7 +339,12 @@ def prepare_validation_data(fracs_path='/srv/scratch/mltidal/fracs_resized.npy')
 
 def test_real_data(model, file_ext, fracs_path='/srv/scratch/mltidal/fracs_actual.npy', send_to_wandb=False, validation_data=None):
     if validation_data is None:
-        validation_data = prepare_validation_data(fracs_path=fracs_path)
+        # validation_data = prepare_validation_data(fracs_path=fracs_path)
+        validation_imgs = np.load('/home/z5214005/ml_icl/badmaskimgs_300kpc.npy')
+        expected = np.load(fracs_path)[2]
+        validation_imgs = validation_imgs[~np.isnan(expected)]
+        expected = expected[~np.isnan(expected)]
+        validation_data = (validation_imgs, expected)
     # Look at the performance of the model
     validation_imgs, expected = validation_data
     # Run the model and calculate the Spearman coefficient
@@ -351,7 +364,9 @@ def test_real_data(model, file_ext, fracs_path='/srv/scratch/mltidal/fracs_actua
     q85s = np.argmax(np.exp(logcs) >= 0.85, axis=0)
     lower_errors = np.abs(predictions - x[q15s])
     upper_errors = np.abs(x[q85s] - predictions)
-    # error = 0.04
+    xerror = np.load('/srv/scratch/mltidal/err_photoz.npy')
+    xerror = xerror[~np.isnan(xerror)]
+    xerror = expected * xerror
     sorted_idxs = np.argsort(expected)
     binned_expected = np.array_split(expected[sorted_idxs], 5)
     binned_predicted = np.array_split(predictions[sorted_idxs], 5)
@@ -361,6 +376,7 @@ def test_real_data(model, file_ext, fracs_path='/srv/scratch/mltidal/fracs_actua
     y = []
     xerr_l = []
     xerr_h = []
+    yerr = []
     for i in range(len(binned_expected)):
         x_med = np.median(binned_expected[i])
         x.append(x_med)
@@ -369,12 +385,13 @@ def test_real_data(model, file_ext, fracs_path='/srv/scratch/mltidal/fracs_actua
 
         xerr_l.append(x_med - np.min(binned_expected[i]))
         xerr_h.append(np.max(binned_expected[i]) - x_med)
+        yerr.append(np.std(binned_predicted[i]))
 
-    plt.errorbar(expected, predictions, fmt='none', yerr=(lower_errors, upper_errors), alpha=0.2, color='gray')
+    plt.errorbar(expected, predictions, fmt='none', yerr=(lower_errors, upper_errors), xerr=xerror, alpha=0.2, color='gray')
     plt.plot(expected, predictions, '.', color='gray', alpha=0.3)
     plt.plot(x, y, 'or')
     plt.plot(x, y, 'r')
-    plt.errorbar(x, y, fmt='none', xerr=(xerr_l, xerr_h), color='red')
+    plt.errorbar(x, y, fmt='none', xerr=(xerr_l, xerr_h), yerr=yerr, color='red')
     maxval = np.max([expected, predictions])
     plt.plot([0, maxval], [0, maxval], 'k--')
     plt.xlabel('Actual fraction')
@@ -420,15 +437,15 @@ if __name__ == '__main__':
         'val_batch_size': 100,
         'optimizer': 'adam',
     },
-    id='1py3rhc4', # resume wandb run
+    id='vx6bs1h5', # resume wandb run
     resume='must'
     )
 
     dataset, validation_dataset = prepare_data()
 
-    model = load_model(model_name='300-final', lr=1e-4)
+    model = load_model(model_name='iclnoise-step1', lr=1e-4)
 
     model = train(model, dataset, validation_dataset, epochs=90, file_ext=file_ext)
 
     plot_results_mode(model, dataset, validation_dataset, file_ext=file_ext, send_to_wandb=True)
-    test_real_data(model, file_ext, fracs_path='notebooks/ccccc.npy', send_to_wandb=True)
+    test_real_data(model, file_ext, fracs_path='/srv/scratch/mltidal/fracs_manual_300kpc.npy', send_to_wandb=True)

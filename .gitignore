@@ -11,3 +11,4 @@ data/notebooks/HSC footprint/*
 .*
 jobs
 wandb
+*.pbs.*

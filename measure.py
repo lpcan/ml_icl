@@ -86,7 +86,7 @@ def calc_icl_frac(cutout, bad_mask, z):
 
     mid = (cutout.shape[0] // 2, cutout.shape[1] // 2)
     # Calculate new, smaller masks for central galaxies
-    threshold = measure_icl.sb2counts(25 + 10 * np.log10(1 + z) + k_corr(z))
+    threshold = measure_icl.sb2counts(26 + 10 * np.log10(1 + z) + k_corr(z))
     deblended = detect_sources(bkg_subtracted, threshold=threshold, npixels=10)
     # Combine to create our new mask
     combined_labels = deblended.data
@@ -159,7 +159,7 @@ def calc_icl_frac(cutout, bad_mask, z):
     not_nans = ~nans
 
     # Display the final image
-    masked_img = counts_img * member_mask * circ_mask * not_nans
+    masked_img = counts_img * member_mask * circ_mask * not_nans * ~hot_mask
 
     icl = np.nansum(masked_img * mask)
     total = np.nansum(masked_img)
@@ -169,7 +169,7 @@ def calc_icl_frac(cutout, bad_mask, z):
 def run_requested_keys(args):
     keys, length, zs, new_ids = args
 
-    cutouts = h5py.File('/srv/scratch/z5214005/generated_data_300.hdf')
+    cutouts = h5py.File('/srv/scratch/z5214005/generated_data_iclnoise.hdf')
     masks = h5py.File('/srv/scratch/z5214005/lrg_cutouts_300kpc_resized.hdf')
 
     # Find the shared memory and create a numpy array interface
@@ -246,4 +246,4 @@ if __name__ == '__main__':
 
     fracs = calc_icl_frac_parallel(new_ids, zs)
 
-    np.save('/srv/scratch/mltidal/fracs_gendata_300.npy', fracs)
+    np.save('/srv/scratch/mltidal/fracs_gendata_iclnoise.npy', fracs)

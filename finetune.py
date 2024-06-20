@@ -9,10 +9,11 @@ import pickle
 
 from supervised_model import ImageRegressor
 
-MODEL_VERSION = '300-final'
+MODEL_VERSION = 'iclnoise-final'
 EPOCHS = 100
-FRACS_PATH = '/srv/scratch/mltidal/fracs_manual_300kpc.npy'
+FRACS_PATH = '/srv/scratch/mltidal/fracs_manual_photoz.npy'
 IMAGES_PATH = 'badmaskimgs_300kpc.npy'
+SAVE_AS = 'iclnoise-timingtest'
 
 def flatten(list):
     return np.array([i for row in list for i in row])
@@ -65,14 +66,14 @@ def create_model():
     finetune_model.load_weights(f'checkpoints/checkpoint-sup-{MODEL_VERSION}.ckpt').expect_partial()
 
     # Freeze the entire model other than the dense layers
-    # for layer in finetune_model._flatten_layers():
-    #     lst_of_sublayers = list(layer._flatten_layers())
+    for layer in finetune_model._flatten_layers():
+        lst_of_sublayers = list(layer._flatten_layers())
 
-    #     if len(lst_of_sublayers) == 1: # leaves of the model
-    #         if layer.name in ['dense_1', 'dense_2']:
-    #             layer.trainable = True
-    #         else:
-    #             layer.trainable = False
+        if len(lst_of_sublayers) == 1: # leaves of the model
+            if layer.name in ['dense_1', 'dense_2']:
+                layer.trainable = True
+            else:
+                layer.trainable = False
 
     return finetune_model
     # from lora import LoraLayer, RANK, ALPHA
@@ -210,8 +211,8 @@ if __name__=='__main__':
         err_h.append(upper_errors)
 
         # Save this version of the model as a checkpoint
-        print(f'Saving model as {MODEL_VERSION}-split{run}')
-        finetune_model.save_weights(f'/srv/scratch/mltidal/finetuning_results/checkpoints/checkpoint-{MODEL_VERSION}-split{run}.ckpt')
+        print(f'Saving model as {SAVE_AS}-split{run}')
+        finetune_model.save_weights(f'/srv/scratch/mltidal/finetuning_results/checkpoints/checkpoint-{SAVE_AS}-split{run}.ckpt')
 
     for i in range(k):
         x = fracs[splits[i]]
@@ -228,7 +229,7 @@ if __name__=='__main__':
     plt.close()
 
     # Save the results so the plot can be recreated
-    with open(f'/srv/scratch/mltidal/finetuning_results/{MODEL_VERSION}.pkl', 'wb') as fp:
+    with open(f'/srv/scratch/mltidal/finetuning_results/{SAVE_AS}.pkl', 'wb') as fp:
         pickle.dump([test_results, err_l, err_h], fp)
 
     # Get overall stats
