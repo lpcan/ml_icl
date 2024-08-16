@@ -1,5 +1,7 @@
 """
-Create a single HDF file with all the downloaded cutouts that can be used to create a TensorFlow dataset
+If cutouts are stored as multiple fits files in a directory, use this to create 
+a single HDF file with all the downloaded cutouts that can be used to create a 
+TensorFlow dataset
 """
 
 from fits2hdf.io.hdfio import export_hdf
@@ -13,7 +15,7 @@ import shutil
 # Don't forget to remove any corrupted/bad images from the cutouts_path directory before running this!
 
 script_dir = os.path.dirname(__file__) # Want paths relative to the script, not relative to current working directory
-cutouts_path = os.path.join(script_dir, '../../cutouts_550kpc/*.fits')#"../raw/cutouts/*.fits") # Where the individual downloaded cutouts are located
+cutouts_path = os.path.join(script_dir, '../../cutouts_550kpc/*.fits') # Where the individual downloaded cutouts are located
 output_path = os.path.join(script_dir, '../../') #"../processed/") # Where to put the final HDF5 file
 
 # Functions to enable sorting in "natural order" (i.e. same order as is in the catalogue). Code from https://stackoverflow.com/questions/5967500/how-to-correctly-sort-a-string-with-a-number-inside

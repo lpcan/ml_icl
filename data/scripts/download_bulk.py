@@ -31,6 +31,9 @@ cosmo = FlatLambdaCDM(H0=70, Om0=0.3)
 # HSC password: ########################################
                 
 def compute_sample_weights(table=None):
+    """
+    Create a table that samples from the LRG table to match the BCG mass distribution
+    """
     if table is None:
         f = fits.open('/srv/scratch/z5214005/lrg_s18a_wide_sm.fits')
         tbl = f[1].data[f[1].data['z'] <= 0.5]
@@ -55,11 +58,13 @@ def compute_sample_weights(table=None):
     bcg_masses = merged['M']
     bcg_kernel = gaussian_kde(bcg_masses) # Kernel density estimate for BCGs
 
+    # Compute the probability of sampling from each mass bin in the two samples
     step = 0.001 # Larger step means faster computation but less accurate kernel
     pts = np.arange(lrg_masses.min(), lrg_masses.max(), step=step)
     probs_lrg = lrg_kernel(pts)
     probs_bcg = bcg_kernel(pts) 
 
+    # Compute the required sample weights
     weights = probs_bcg / probs_lrg
 
     idxs = ((lrg_masses - lrg_masses.min()) // step).astype(int) # What weight does each entry in the lrg table correspond to? 
@@ -68,7 +73,11 @@ def compute_sample_weights(table=None):
     return weights / np.sum(weights) # Needs to be a vector of probabilities
 
 def create_table(size=50_000):
-    # Create a list of coordinates of clusters that we want to download
+    """
+    Create a list of `size` coordinates to download by weighted sampling of LRG
+    table
+    """
+    
     f = fits.open(os.path.join(script_dir, '/srv/scratch/z5214005/lrg_s18a_wide_sm.fits'))
     tbl = f[1].data[f[1].data['z'] <= 0.5]
     tbl = tbl[tbl['z'] >= 0.1]
@@ -90,6 +99,10 @@ def create_table(size=50_000):
     return tbl
 
 def download_bulk(tbl, overwrite=False):
+    """
+    Perform multiple bulk downloads of all clusters in `tbl`, crop to 600x600kpc,
+    resize to 224x224 pixels, and save into a HDF file.
+    """
     if overwrite:
         input('Are you sure you want to overwrite? If not, exit now!')
         resized_cutouts = h5py.File('/srv/scratch/z5214005/lrg_cutouts_300kpc_resized.hdf', 'w') # File to put all the processed cutouts into
@@ -108,7 +121,7 @@ def download_bulk(tbl, overwrite=False):
     # Download cutouts 2000 galaxies at a time 
     pdr2 = hsc.Hsc(dr='pdr2', rerun=rerun)
 
-    # Only download the unique galaxies
+    # Only download the unique galaxies to minimise the amount of downloads
     _, unique_ids, repeats = np.unique(tbl['old_ids'], return_index=True, return_counts=True)
     to_download = tbl[unique_ids]
     to_download['repeats'] = repeats

@@ -14,10 +14,10 @@ from unagi.task import hsc_cutout
 # Parameters
 script_dir = os.path.dirname(__file__)
 
-cat_path = '/srv/scratch/z5214005/camira_final.tbl' #"../raw/camira_s20a_wide.tbl"
-exclude = None #"../raw/camira_s20a_dud.tbl"
-half_size = 1 * u.arcmin
-output_dir = '/srv/scratch/mltidal/' #"../raw/cutouts/"
+cat_path = '/srv/scratch/z5214005/camira_final.tbl' 
+exclude = None # do not redownload clusters that are already in `exclude`
+half_size = 1 * u.arcmin 
+output_dir = '/srv/scratch/mltidal/'
 rerun = "pdr2_dud"
 
 # HSC username: locan@local
@@ -33,7 +33,7 @@ tbl = ascii.read(cat_path, names = ['ID',
                                     'BCG redshift'])
 tbl = tbl[:125]
 zs = tbl['z_cl']
-ras = tbl['RA [deg]'][zs <= 0.5]
+ras = tbl['RA [deg]'][zs <= 0.5] # remove clusters that are z > 0.5
 decs = tbl['Dec [deg]'][zs <= 0.5]
 names = tbl['Name'][zs <= 0.5]
 zs = zs[zs <= 0.5]

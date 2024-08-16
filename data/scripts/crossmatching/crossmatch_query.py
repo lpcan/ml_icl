@@ -1,3 +1,8 @@
+"""
+Check how many coordinates in the LRG wide member table are within the DUD 
+footprint of the HSC survey and save as a table.
+"""
+
 from astropy.io import fits
 from astropy.table import Table, vstack
 

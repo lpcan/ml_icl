@@ -22,6 +22,12 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+"""
+Code edited from 
+https://hsc-gitlab.mtk.nao.ac.jp/ssp-software/data-access-tools/tree/master/pdr2/hscSspCrossMatch
+to check existence of object in r-band
+"""
+
 VERSION = "2023.05.16.1"
 
 import numpy

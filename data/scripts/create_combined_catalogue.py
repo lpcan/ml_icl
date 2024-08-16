@@ -1,5 +1,6 @@
 """
-Create a table of successfully downloaded cutouts with consistent IDs
+Create a table of all successfully downloaded cutouts from both DUD and WIDE
+with consistent IDs
 """
 
 from astropy.io import ascii
