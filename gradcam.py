@@ -11,12 +11,12 @@ import h5py
 import skimage
 from astropy.io import ascii
 
-from supervised_model import ImageRegressor
+from model import ImageRegressor
 from data.scripts.display_cutouts import stretch
-from measure import calc_icl_frac
+from measure_sb_cut.scripts.measure import calc_icl_frac
 from augmentations import val_augmenter
 
-MODEL = '300_36-final'
+MODEL = 'iclnoise-final'
 
 def make_grad_model(model, last_conv_layer_name='conv2d_187'):
     # Get the name of the final convolutional layer in the encoder
@@ -87,23 +87,14 @@ def make_gradcam_heatmap(batch, augmenter, last_conv_layer_model, grad_model):
 
 if __name__=='__main__':
     # Load the data
-    # cutouts = h5py.File('/srv/scratch/mltidal/generated_data_wparams.hdf')
     print('Loading images...')
-    # cutouts = h5py.File('/srv/scratch/z5214005/cutouts_300/cutouts_300.hdf')
-    fracs = np.load('/srv/scratch/mltidal/fracs_manual_300_26.npy')[2]
+    fracs = np.load('/srv/scratch/mltidal/fracs_manual_photoz.npy')[2]
+
+    tbl = ascii.read('/srv/scratch/z5214005/camira_final.tbl')
+    zs = tbl['z_cl']
+    cutouts = h5py.File('/srv/scratch/z5214005/cutouts_300/cutouts_300.hdf')
 
     not_nans = np.where(~np.isnan(fracs))[0]
-
-    # Create an array of images that we have fractions for
-    # dataset = []
-    # for idx in not_nans:
-    #     cutout = cutouts[str(idx)]['HDU0']['DATA']
-    #     img = skimage.transform.resize(cutout, (224,224))
-    #     img = np.clip(img, a_min=0, a_max=10)
-    #     img = np.arcsinh(img / 0.017359)
-    #     img = np.expand_dims(img, -1) 
-    #     dataset.append(img)
-    # dataset = np.array(dataset) 
 
     dataset = np.load('badmaskimgs_300kpc.npy')
     dataset = dataset[not_nans]
@@ -117,7 +108,7 @@ if __name__=='__main__':
     splits = np.array_split(idxs, k)
 
     # Get the original predictions
-    with open(f'/srv/scratch/mltidal/finetuning_results/{MODEL}-final.pkl', 'rb') as fp:
+    with open(f'/srv/scratch/mltidal/finetuning_results/{MODEL}.pkl', 'rb') as fp:
         results, err_l, err_h = pickle.load(fp)
     
     results = np.array([i for row in results for i in row])
@@ -145,9 +136,7 @@ if __name__=='__main__':
 
         gradcams[test_set, :, :] = heatmaps
         images[test_set, :, :] = img_arrays
-
-    # Prepare all the masks
-    # masks = np.load('/srv/scratch/mltidal/masks.npy')
+        
     cmap = matplotlib.colormaps['viridis']
     cmap.set_bad(cmap(0))
 
@@ -193,8 +182,11 @@ if __name__=='__main__':
 
             # Show the masked version of the image
             plt.subplot(6, 4, sp_row+3)
-            mask = masks[idx]
-            plt.imshow(mask, cmap=cmap, interpolation='none')
+            cutout = skimage.transform.resize(cutouts[str(idx)]['HDU0']['DATA'], (224,224))
+            bad_mask = (np.array(cutouts[str(idx)]['HDU1']['DATA']).astype(int) & (1 | (1 << 8) | (1 << 9)))
+            bad_mask = skimage.transform.resize(bad_mask.astype(bool), (224,224))
+            _, _, _, mask = calc_icl_frac(cutout, bad_mask, zs[idx], return_mask=True)
+            plt.imshow(stretch(mask) * ~bad_mask, cmap=cmap, interpolation='none')
             plt.title(fracs[idx])
             plt.xticks([])
             plt.yticks([])

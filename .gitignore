@@ -12,3 +12,6 @@ data/notebooks/HSC footprint/*
 jobs
 wandb
 *.pbs.*
+notebooks/*
+contrastive_model/*
+umap/*

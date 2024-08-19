@@ -92,19 +92,6 @@ class RandomGaussianNoise(layers.Layer):
         images += 3 * self.stddev * tf.random.normal(tf.shape(images))
         return images
 
-# def augmenter(input_shape, crop_ratio=3/4, crop_prob=0.5,
-#               crop_jitter_max=0.1, cutout_height_width=0.1):
-#     return keras.Sequential(
-#         [
-#             layers.Input(shape=input_shape),
-#             layers.Normalization(mean=0.948, variance=1.108**2),
-#             layers.RandomFlip(mode="horizontal_and_vertical"),
-#             RandomResizedCrop(ratio=(crop_ratio, 1/crop_ratio), prob_ratio_change=crop_prob, jitter_max=crop_jitter_max),
-#             RandomGaussianNoise(stddev=0.017359),
-#             keras_cv.layers.preprocessing.RandomCutout(cutout_height_width, cutout_height_width),
-#         ]
-#     )
-
 class RandomRotate90(layers.Layer):
     def __init__(self):
         super().__init__()
