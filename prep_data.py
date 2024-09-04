@@ -65,3 +65,27 @@ def prepare_test_data(save=False):
     if save:
         np.save('badmaskimgs_300kpc.npy')
     return images
+
+def prepare_run_data(image_path):
+    cutouts = h5py.File(image_path)
+    images = []
+
+    for key in cutouts.keys():
+        cutout = np.array(cutouts[key]['DATA'])
+        mask = np.array(cutouts[key]['MASK']).astype(int) & (BAD | NO_DATA | BRIGHT_OBJECT)
+
+        # Resize
+        mask = skimage.transform.resize(mask, (224,224))
+        img = skimage.transform.resize(cutout, (224,224))
+
+        # Scale the images and apply the mask
+        img = np.clip(img, a_min=0, a_max=10)
+        img = np.arcsinh(img / 0.017359) * ~(mask > 0)
+
+        # Place into array
+        img = np.expand_dims(img, -1)
+        images.append(img)
+
+    images = np.array(images) 
+
+    return images
