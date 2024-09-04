@@ -40,7 +40,7 @@ TODO: Move these instructions into a notebook to make it clearer
 - - apply the bright star mask to the image, such that the image is set to 0 where there is a mask
 3. Create the model and load the weights using `model = load_model(model_name=checkpoint-finetuned)`. By default, this will look for the checkpoint file in the `checkpoints/` folder, but you can change this with the `path_prefix` argument, like `load_model(model_name=checkpoint-finetuned, path_prefix=path_to_checkpoint_directory)`. 
 
-4. Run the model using `outputs = model(data)`, which will give you an array of Tensorflow Probability distributions. To find the mode of each distribution and thus the final predictions, run the below code:
+4. Run the model using `outputs = model(data)`, which will give you an array of Tensorflow Probability distributions. To find the mode of each distribution (the final predictions) and the 15th and 85th percentiles (uncertainties), run the below code:
 ```python
 x = np.arange(0, 0.6, 0.0005)
 logps = []
@@ -50,7 +50,13 @@ for i in x:
     logcs.append(outputs.log_cdf(i).numpy())
 logps = np.stack(logps)
 logcs = np.stack(logcs)
+
 predictions = x[np.exp(logps).argmax(axis=0)]
+
+q15s = np.argmax(np.exp(logcs) >= 0.15, axis=0)
+q85s = np.argmax(np.exp(logcs) >= 0.85, axis=0)
+lower_errors = np.abs(predictions - x[q15s])
+upper_errors = np.abs(x[q85s] - predictions)
 ```
 
 ### Finetuning the model on new data
