@@ -58,7 +58,7 @@ class ImageRegressor(keras.Model):
         outputs = self.prob_output(x)
         return outputs
     
-def load_model(model_name=None, model_path_prefix='checkpoints/checkpoint-sup-', lr=1e-4):
+def load_model(model_name=None, model_path_prefix='checkpoints/', lr=1e-4):
     model = ImageRegressor((224,224,1))
 
     negloglik = lambda y, p_y: -p_y.log_prob(y) # Negative log likehood loss
