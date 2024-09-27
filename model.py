@@ -7,7 +7,7 @@ from tensorflow.keras import layers
 import tensorflow_probability as tfp
 import resnet_cifar10_v2
 
-from augmentations import augmenter
+from augmentations import augmenter, val_augmenter
 
 N = 6
 DEPTH = N*9+2
@@ -68,4 +68,13 @@ def load_model(model_name=None, model_path_prefix='checkpoints/', lr=1e-4):
     if model_name is not None: 
         model.load_weights(f'{model_path_prefix}{model_name}.ckpt').expect_partial()
 
+    return model
+
+def load_val_model(model_name=None, model_path_prefix='checkpoints/'):
+    model = ImageRegressor((224,224,1))
+    model.augmenter = val_augmenter((224,224,1)) # Replace the augmenter with the validation one
+    
+    if model_name is not None:
+        model.load_weights(f'{model_path_prefix}{model_name}.ckpt').expect_partial()
+    
     return model

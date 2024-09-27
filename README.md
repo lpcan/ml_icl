@@ -3,6 +3,8 @@ This repository contains code and documentation that can be used to train, finet
 
 The code has been tested on Python 3.9.6 and Python 3.9.17. The `requirements.txt` file describes the Python packages that are needed to run this code. 
 
+If you find bugs or have questions, please let me know at l.canepa@unsw.edu.au!
+
 ## Model description
 The basic structure of the model is comprised of an encoder which accepts the input images and encodes them into meaningful vector representations, and output layers which transform these into an ICL fraction prediction in the form of a probability distribution. The model architecture is described in `model.py`.
 
@@ -25,43 +27,10 @@ Below I briefly describe the structure of the repository and the files in it. Yo
 - `measure_sb_cut/*`: this directory contains code related to doing measurements on the data with the surface brightness cut method. Generally, you won't need to look at these files unless you are interested in how the measurement is done. `measure.py` is used to automatically measure the training set. `measure_manual.py` is used to measure the real clusters. `measurement_helpers.py` contains functions that are common to both methods.
 
 ## Using this code
-Below I describe how to set up and use this code in two possible use cases of the model, and the full method that can be used to reproduce the results from Canepa et al. (in prep). Model checkpoints and datasets for download can be found (TODO add Zenodo link)
+The `demos/` directory contains notebooks showing how the model can be directly applied to new data, how the model can be finetuned on new data, and how to produce GradCAM maps from an input. The full method that can be used to reproduce the results from Canepa et al. (in prep) is described below. Model checkpoints and datasets for download can be found (TODO add Zenodo link)
 
-### Applying the model directly to new data
-TODO: Move these instructions into a notebook to make it clearer
-1. Download the finetuned model checkpoint (`checkpoint-finetuned.zip`)
-2. Prepare your data as a numpy array. You can use `prepare_data(path_to_images_file)`, which assumes that your data is in a HDF5 file organised by object ID, and each object contains two datasets: `'DATA'` (the data layer), and `'MASK'` (the mask layer) as downloaded from the HSC-SSP survey. If this does not apply to your data, you can prepare the data with the following steps:
-    - resizing each image to a (224, 224, 1) array
-    - stretch the image in a similar way to:
-```python
-    img = np.clip(img, a_min=0, a_max=10)
-    img = np.arcsinh(img / 0.017359)
-```
-- - apply the bright star mask to the image, such that the image is set to 0 where there is a mask
-3. Create the model and load the weights using `model = load_model(model_name=checkpoint-finetuned)`. By default, this will look for the checkpoint file in the `checkpoints/` folder, but you can change this with the `path_prefix` argument, like `load_model(model_name=checkpoint-finetuned, path_prefix=path_to_checkpoint_directory)`. 
-
-4. Run the model using `outputs = model(data)`, which will give you an array of Tensorflow Probability distributions. To find the mode of each distribution (the final predictions) and the 15th and 85th percentiles (uncertainties), run the below code:
-```python
-x = np.arange(0, 0.6, 0.0005)
-logps = []
-logcs = []
-for i in x:
-    logps.append(outputs.log_prob(i).numpy())
-    logcs.append(outputs.log_cdf(i).numpy())
-logps = np.stack(logps)
-logcs = np.stack(logcs)
-
-predictions = x[np.exp(logps).argmax(axis=0)]
-
-q15s = np.argmax(np.exp(logcs) >= 0.15, axis=0)
-q85s = np.argmax(np.exp(logcs) >= 0.85, axis=0)
-lower_errors = np.abs(predictions - x[q15s])
-upper_errors = np.abs(x[q85s] - predictions)
-```
-
-### Finetuning the model on new data
-TODO: add demo of these steps in a notebook
-TODO
+### Applying the model, finetuning the model, producing GradCAM maps
+Check out the notebooks in the `demos/` directory. If you notice any bugs or run into problems, please let me know!
 
 ### Reproducing the full training from the paper
 TODO

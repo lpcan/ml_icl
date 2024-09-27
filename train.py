@@ -129,7 +129,7 @@ def binned_plot(dataset, Y, ds_numpy=None, filename='binned_plot.png', n=10, per
 
     ax.set_xlabel('Actual ICL fraction')
     ax.set_ylabel('Predicted ICL fraction')
-    plt.savefig(fname=filename)
+    plt.savefig(fname=filename, bbox_inches='tight')
     
     plt.close()
 
@@ -208,23 +208,18 @@ def test_real_data(model, file_ext, imgs_path, fracs_path, send_to_wandb=False):
     # Run the model on the test images
     x = np.arange(0, 0.6, 0.0005)
     outputs = model(test_imgs)
-    logps = []
-    logcs = []
-    for i in x:
-        logps.append(outputs.log_prob(i).numpy())
-        logcs.append(outputs.log_cdf(i).numpy())
-    logps = np.stack(logps)
-    logcs = np.stack(logcs)
-    predictions = x[np.exp(logps).argmax(axis=0)]
+    dists = outputs.distribution.prob(x)
+    predictions = x[np.argmax(dists, axis=1)]
+    cdfs = outputs.distribution.cdf(x)
 
     # Calculate the model's uncertainty
-    q15s = np.argmax(np.exp(logcs) >= 0.15, axis=0)
-    q85s = np.argmax(np.exp(logcs) >= 0.85, axis=0)
+    q15s = np.argmax(cdfs >= 0.15, axis=0)
+    q85s = np.argmax(cdfs >= 0.85, axis=0)
     lower_errors = np.abs(predictions - x[q15s])
     upper_errors = np.abs(x[q85s] - predictions)
 
     # Load the measurement errors
-    xerror = np.load('/srv/scratch/mltidal/err_photoz.npy')
+    xerror = np.load('err_photoz.npy')
     xerror = xerror[~np.isnan(xerror)]
     xerror = expected * xerror
     sorted_idxs = np.argsort(expected)
@@ -258,7 +253,7 @@ def test_real_data(model, file_ext, imgs_path, fracs_path, send_to_wandb=False):
     plt.xlabel('Actual ICL fraction')
     plt.ylabel('Predicted ICL fraction')
 
-    plt.savefig(f'test_graph-{file_ext}.png')
+    plt.savefig(f'test_graph-{file_ext}.pdf', bbox_inches='tight')
     plt.close()
 
     # Print the result
