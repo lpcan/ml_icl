@@ -37,11 +37,11 @@ def prepare_training_data():
 
     return dataset, validation_dataset
 
-def prepare_test_data(save=False):
+def prepare_test_data(hdf_path='data/processed/cutouts_300.hdf', save=False):
     """
     Process test data and save as a numpy array
     """
-    cutouts = h5py.File('/srv/scratch/z5214005/cutouts_300/cutouts_300.hdf')
+    cutouts = h5py.File(hdf_path)
     images = []
 
     for idx in range(125):
@@ -63,7 +63,7 @@ def prepare_test_data(save=False):
     images = np.array(images)
 
     if save:
-        np.save('badmaskimgs_300kpc.npy')
+        np.save('prepared_images.npy')
     return images
 
 def prepare_run_data(image_path):

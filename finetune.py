@@ -5,14 +5,15 @@ from tensorflow import keras
 import tensorflow as tf
 import pickle
 
-from model import ImageRegressor
+from model import load_model
 from prep_data import prepare_test_data
 
-MODEL_VERSION = 'iclnoise-final'
+MODEL_VERSION = 'checkpoint-trained'
 EPOCHS = 100
-FRACS_PATH = '/srv/scratch/mltidal/fracs_manual_photoz.npy'
-IMAGES_PATH = 'badmaskimgs_300kpc.npy'
-SAVE_AS = 'iclnoise-timingtest'
+FRACS_PATH = 'fracs_manual_photoz.npy'
+PREPPED_IMAGES_PATH = 'data/processed/badmaskimgs_300kpc.npy' # Set to None to prepare data from HDF file
+HDF_PATH = None
+SAVE_AS = 'checkpoints/test_checkpoint' # Checkpoint filename
 
 def flatten(list):
     return np.array([i for row in list for i in row])
@@ -26,11 +27,11 @@ def prepare_data():
 
     not_nans = np.where(~np.isnan(fracs))[0]
 
-    if IMAGES_PATH is None:
-        images = prepare_test_data()
+    if PREPPED_IMAGES_PATH is None:
+        images = prepare_test_data(HDF_PATH, save=False)
         images = images[not_nans]
     else:
-        images = np.load(IMAGES_PATH)
+        images = np.load(PREPPED_IMAGES_PATH)
         images = images[not_nans] 
 
     fracs = fracs[not_nans]
@@ -39,12 +40,7 @@ def prepare_data():
 
 def create_model():
     # Create the model
-    finetune_model = ImageRegressor((224,224,1))
-    negloglik = lambda y, p_y: -p_y.log_prob(y)
-    mae = lambda y, p_y: tf.math.abs(y - p_y.mean())
-    optimizer = keras.optimizers.Adam(learning_rate=1e-7)
-    finetune_model.compile(optimizer=optimizer, loss=negloglik)
-    finetune_model.load_weights(f'checkpoints/checkpoint-sup-{MODEL_VERSION}.ckpt').expect_partial()
+    finetune_model = load_model(model_name=MODEL_VERSION, lr=1e-7)
 
     # Freeze the entire model other than the dense layers
     for layer in finetune_model._flatten_layers():
@@ -64,10 +60,68 @@ def final_finetune():
 
     finetune_model = create_model()
 
-    finetune_model.fit(images, fracs, epochs=100)
+    finetune_model.fit(images, fracs, epochs=EPOCHS)
 
     print(f'Saving model as {MODEL_VERSION}')
-    finetune_model.save_weights(f'/srv/scratch/mltidal/finetuning_results/checkpoints/checkpoint-{MODEL_VERSION}.ckpt')
+    finetune_model.save_weights(f'{SAVE_AS}.ckpt')
+
+def finetune_one_split():
+    # Finetune on just one split of the data
+    fracs, images = prepare_data()
+
+    # Split the data for training and testing
+    rng = np.random.default_rng(seed=24)
+    idxs = np.arange(len(fracs))
+    rng.shuffle(idxs)
+    splits = np.array_split(idxs, 5)
+    test_set = splits[0]
+    train_set = np.concatenate(splits[1:])
+    test_ds = images[test_set]
+    test_labels = fracs[test_set]
+    train_ds = images[train_set]
+    train_labels = fracs[train_set]
+
+    # Create and train the model
+    finetune_model = create_model()
+
+    # Check that the model is functioning as we expect
+    finetune_model.evaluate(test_ds, test_labels)
+    predictions = finetune_model.predict(test_ds)
+
+    print(f'MAE = {np.mean(np.abs(test_labels - predictions))}')
+
+    # Train the model
+    finetune_model.fit(train_ds, train_labels, validation_data=(test_ds, test_labels), epochs=EPOCHS)
+
+    # Evaluate the model
+    finetune_model.evaluate(test_ds, test_labels)
+    x = np.arange(0, 0.6, 0.0005)
+    dists = outputs.distribution.prob(x) # Get all the output probability distributions as arrays
+    predictions = x[np.argmax(dists, axis=1)] # Find the peaks of the distributions
+    cdfs = outputs.distribution.cdf(x) # Get the CDFs
+
+    # Get the 15 and 85 percentile uncertainties
+    q15s = np.argmax(cdfs >= 0.15, axis=1)
+    q85s = np.argmax(cdfs >= 0.85, axis=1)
+    lower_errors = np.abs(predictions - x[q15s])
+    upper_errors = np.abs(x[q85s] - predictions)
+
+    print(f'MAE = {np.mean(np.abs(test_labels - predictions))}')
+    print(pearsonr(test_labels, predictions))
+
+    # Plot the result of this finetuning run
+    plt.errorbar(test_labels, predictions, fmt='none', yerr=(lower_errors, upper_errors), alpha=0.3)
+    plt.scatter(test_labels, predictions)
+    maxval = np.max([test_labels, predictions])
+    plt.plot([0,maxval], [0,maxval], 'k--')
+    plt.xlabel('Expected')
+    plt.ylabel('Predicted')
+    plt.savefig('result.png')
+    plt.close()
+
+    # Save the results so the plot can be recreated
+    with open(f'{SAVE_AS}-results.pkl', 'wb') as fp:
+        pickle.dump([test_results, err_l, err_h], fp)
 
 # Finetuning on separate splits of the data
 if __name__=='__main__':
@@ -135,7 +189,7 @@ if __name__=='__main__':
 
         # Save this version of the model as a checkpoint
         print(f'Saving model as {SAVE_AS}-split{run}')
-        finetune_model.save_weights(f'/srv/scratch/mltidal/finetuning_results/checkpoints/checkpoint-{SAVE_AS}-split{run}.ckpt')
+        finetune_model.save_weights(f'{SAVE_AS}-split{run}.ckpt')
 
     for i in range(k):
         x = fracs[splits[i]]
@@ -148,11 +202,11 @@ if __name__=='__main__':
     plt.plot([0,maxval], [0,maxval], 'k--')
     plt.xlabel('Expected')
     plt.ylabel('Predicted')
-    plt.savefig('asdf1.png')
+    plt.savefig('result.png')
     plt.close()
 
     # Save the results so the plot can be recreated
-    with open(f'/srv/scratch/mltidal/finetuning_results/{SAVE_AS}.pkl', 'wb') as fp:
+    with open(f'{SAVE_AS}-results.pkl', 'wb') as fp:
         pickle.dump([test_results, err_l, err_h], fp)
 
     # Get overall stats
@@ -190,7 +244,7 @@ if __name__=='__main__':
     plt.ylabel('Predicted')
     plt.plot([0,maxval], [0,maxval], 'k--')
 
-    plt.savefig('funs.png')
+    plt.savefig('binned_results.png')
 
     print(f'MAE = {np.mean(np.abs(flattened_results - actual))}')
     print(pearsonr(actual, flattened_results))

@@ -27,10 +27,17 @@ Below I briefly describe the structure of the repository and the files in it. Yo
 - `measure_sb_cut/*`: this directory contains code related to doing measurements on the data with the surface brightness cut method. Generally, you won't need to look at these files unless you are interested in how the measurement is done. `measure.py` is used to automatically measure the training set. `measure_manual.py` is used to measure the real clusters. `measurement_helpers.py` contains functions that are common to both methods.
 
 ## Using this code
-The `demos/` directory contains notebooks showing how the model can be directly applied to new data, how the model can be finetuned on new data, and how to produce GradCAM maps from an input. The full method that can be used to reproduce the results from Canepa et al. (in prep) is described below. Model checkpoints and datasets for download can be found (TODO add Zenodo link)
+Two common use cases of the model would be to directly apply the model to new, unseen data, or to finetune the model. The full method that can be used to reproduce the results from Canepa et al. (in prep) is also described below. Model checkpoints and datasets for download can be found (TODO add Zenodo link)
 
-### Applying the model, finetuning the model, producing GradCAM maps
+### Applying the model, producing GradCAM maps.
 Check out the notebooks in the `demos/` directory. If you notice any bugs or run into problems, please let me know!
+
+### Finetuning the model
+`finetune.py` can be used to finetune the model again. Check the comments in that file for more detail of how it works. This file by default does a 5-fold cross-validation on the finetuning data. If instead you want to only perform one round of finetuning, you can use the `finetune_one_split()` function, or if you want to finetune on all the data, you can use the `final_finetune()` function. 
+
+This code should be run on a GPU if possible. It'll work on a CPU, but will take a long time.
+
+To reproduce the 
 
 ### Reproducing the full training from the paper
 TODO
