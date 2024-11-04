@@ -62,7 +62,7 @@ def final_finetune():
 
     finetune_model.fit(images, fracs, epochs=EPOCHS)
 
-    print(f'Saving model as {MODEL_VERSION}')
+    print(f'Saving model as {SAVE_AS}')
     finetune_model.save_weights(f'{SAVE_AS}.ckpt')
 
 def finetune_one_split():
@@ -95,6 +95,7 @@ def finetune_one_split():
 
     # Evaluate the model
     finetune_model.evaluate(test_ds, test_labels)
+    outputs = finetune_model(test_ds)
     x = np.arange(0, 0.6, 0.0005)
     dists = outputs.distribution.prob(x) # Get all the output probability distributions as arrays
     predictions = x[np.argmax(dists, axis=1)] # Find the peaks of the distributions
@@ -121,7 +122,7 @@ def finetune_one_split():
 
     # Save the results so the plot can be recreated
     with open(f'{SAVE_AS}-results.pkl', 'wb') as fp:
-        pickle.dump([test_results, err_l, err_h], fp)
+        pickle.dump([predictions, lower_errors, upper_errors], fp)
 
 # Finetuning on separate splits of the data
 if __name__=='__main__':
