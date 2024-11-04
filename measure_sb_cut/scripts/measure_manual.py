@@ -5,7 +5,7 @@ threshold method.
 
 from astropy import wcs
 from astropy.convolution import Gaussian2DKernel, convolve
-from astropy.coordinated import SkyCoord
+from astropy.coordinates import SkyCoord
 from astropy.cosmology import FlatLambdaCDM
 from astropy.io import ascii
 from astropy.stats import sigma_clipped_stats
@@ -30,22 +30,16 @@ BRIGHT_OBJECT = (1 << 9)
 cmap = matplotlib.colormaps['viridis']
 cmap.set_bad(cmap(0))
 cosmo = FlatLambdaCDM(H0=68.4, Om0=0.301)
-
-# Read table and cutouts file
-tbl = ascii.read('/srv/scratch/z5214005/camira_final.tbl')
-cutouts = h5py.File('/srv/scratch/z5214005/cutouts_300/cutouts_300.hdf')
-
 pdr2 = hsc.Hsc(dr='pdr2', rerun='pdr2_dud',config_file=None)
 
-def get_xy(idx, ras, decs, original_shape):
+def get_xy(ras, decs, original_shape, header):
     """
     Get the pixel locations of the cluster members
     """
 
     member_ras = ras
     member_decs = decs
-
-    header = cutouts[str(idx)]['HDU0']['HEADER'][()]
+        
     w = wcs.WCS(header)
 
     coords = SkyCoord(member_ras, member_decs, unit='deg')
@@ -55,12 +49,12 @@ def get_xy(idx, ras, decs, original_shape):
 
     return x_coords, y_coords
 
-def get_members(idx, original_shape, cutouts, pdr2):
+def get_members(cluster, original_shape, header):
     """
     Return cluster member pixel locations
     """
 
-    cluster = tbl[idx]
+    # cluster = tbl[idx]
     half_size = (cosmo.arcsec_per_kpc_proper(cluster['z_cl']) * 300).value
 
     query = f"""SELECT
@@ -86,7 +80,7 @@ def get_members(idx, original_shape, cutouts, pdr2):
 
     z = cluster['z_cl']
     photoz_members = result[(result['photoz_best'] < (z + 3*0.05*(1+z))) & (result['photoz_best'] > (z - 3*0.05*(1+z)))]
-    coords = get_xy(idx, photoz_members['ra'], photoz_members['dec'], original_shape)
+    coords = get_xy(photoz_members['ra'], photoz_members['dec'], original_shape, header)
     
     return coords
 
@@ -128,10 +122,9 @@ def radial_profile(cutout, mask):
 
     return means, stds
 
-def create_non_member_mask(cutout, idx, mask, original_shape, member_coords, aggressive=True):
+def create_non_member_mask(cutout, cluster, mask, original_shape, member_coords, aggressive=True, sigma=0.3):
     # Segment and deblend the cutout
-    cluster = tbl[idx]
-    threshold = measurement_helpers.sb2counts(26 + 10 * np.log10(1 + cluster['z_cl']) + k_corr(cluster['z_cl']))
+    threshold = measurement_helpers.sb2counts(26 + 10 * np.log10(1 + cluster['z_cl']) + measurement_helpers.k_corr(cluster['z_cl']))
     segmented = detect_sources(cutout, threshold=threshold, npixels=10)
     deblended = deblend_sources(cutout, segmented, npixels=10, progress_bar=False).data
 
@@ -152,7 +145,7 @@ def create_non_member_mask(cutout, idx, mask, original_shape, member_coords, agg
     non_member_labels = [label for label in np.unique(deblended)
                          if label not in member_labels and label != 0]
     enlarged = measurement_helpers.enlarge_mask(np.isin(deblended, non_member_labels), 
-                                        sigma=0.3)
+                                        sigma=sigma)
     enlarged = enlarged * ~np.isin(deblended, member_labels)
     
     # Add in the hot mask
@@ -167,11 +160,15 @@ def create_non_member_mask(cutout, idx, mask, original_shape, member_coords, agg
 
     return enlarged | hot_mask
 
-def background_estimate_2d(cutout, bad_mask, constant=True):
+def background_estimate_2d(cutout, bad_mask, constant=True, multiplier=1, mask_initial=False):
     spacing = 10
     # Fit and subtract off any gradients in the image
     box_size = 224 // 14
-    bkg_initial = Background2D(cutout, box_size=box_size)
+    if not mask_initial:
+        bkg_initial = Background2D(cutout, box_size=box_size)
+    else:
+        bkg_initial = Background2D(cutout, box_size=box_size, mask=bad_mask)
+        
     mesh = bkg_initial.background_mesh
 
     Y, X = np.ogrid[:mesh.shape[0], :mesh.shape[1]]
@@ -206,14 +203,14 @@ def background_estimate_2d(cutout, bad_mask, constant=True):
         mean, _, _ = sigma_clipped_stats(annulus[masks[i]])
         means.append(mean)
 
-    mean_of_means = 1 * np.min(means) / 3
+    mean_of_means = multiplier * np.min(means) / 3
 
     if constant:
         bkg = bkg + mean_of_means
 
     return bkg
 
-def calc_icl_frac(cutout, bad_mask, idx, z, original_shape, constant=True, seg_threshold=26, aggressive=True):
+def calc_icl_frac(cutout, bad_mask, idx, z, original_shape, tbl, header, constant=True, seg_threshold=26, aggressive=True):
     if bad_mask[112,112]:
         # Bright star mask extends over the centre of the image, get rid of it
         bad_mask = np.zeros_like(bad_mask, dtype=bool)
@@ -231,11 +228,11 @@ def calc_icl_frac(cutout, bad_mask, idx, z, original_shape, constant=True, seg_t
     plt.subplot(142)
     plt.imshow(measurement_helpers.stretch(bkg_subtracted), cmap=cmap)
 
-    x_loc, y_loc = get_members(idx, original_shape)
+    x_loc, y_loc = get_members(tbl[idx], original_shape, header)
 
     plt.scatter(x_loc, y_loc, s=40, edgecolor='white', facecolor='none')
 
-    non_member_mask = create_non_member_mask(bkg_subtracted, idx, mask=bad_mask, original_shape=original_shape, member_coords = (x_loc, y_loc), aggressive=aggressive)
+    non_member_mask = create_non_member_mask(bkg_subtracted, tbl[idx], mask=bad_mask, original_shape=original_shape, member_coords = (x_loc, y_loc), aggressive=aggressive)
 
     # Create the circular mask
     centre = (cutout.shape[1] // 2, cutout.shape[0] // 2)
@@ -305,6 +302,8 @@ def run_one():
 
     cutout = np.array(cutouts[str(idx)]['HDU0']['DATA'])
     mask = (np.array(cutouts[str(idx)]['HDU1']['DATA']).astype(int) & (BAD | BRIGHT_OBJECT | NO_DATA)).astype(bool)
+    header = cutouts[str(idx)]['HDU0']['HEADER'][()]
+
     # cutout = cutout * ~mask
     original_shape = cutout.shape
     cutout = skimage.transform.resize(cutout, (224,224))
@@ -326,7 +325,7 @@ def run_one():
     # manual_star_mask = manual_star_mask | ((thetas < alpha) & (thetas > 0) & (phis < beta) & (phis > 0))
     mask = mask | manual_star_mask
 
-    calc_icl_frac(cutout, mask, tbl['z_cl'][idx], original_shape=original_shape, aggressive=False, constant=constant)
+    calc_icl_frac(cutout, mask, tbl['z_cl'][idx], original_shape=original_shape, tbl=tbl, header=header, aggressive=False, constant=constant)
 
     # Show the pre and post-subtracted radial profiles
     spacing = 10
@@ -356,6 +355,9 @@ def run_one():
 
 
 if __name__ == '__main__':
+    # Read table and cutouts file
+    tbl = ascii.read('/srv/scratch/z5214005/camira_final.tbl')
+    cutouts = h5py.File('/srv/scratch/z5214005/cutouts_300/cutouts_300.hdf')
     # First pass run through all images with default parameters
     for idx in range(125):
         print(f'======================={idx}=======================')
@@ -366,7 +368,7 @@ if __name__ == '__main__':
         cutout = skimage.transform.resize(cutout, (224,224))
         mask = skimage.transform.resize(cutout, (224,224))
 
-        calc_icl_frac(cutout, mask, tbl['z_cl'][idx], original_shape, aggressive=False)
+        calc_icl_frac(cutout, mask, tbl['z_cl'][idx], original_shape, tbl, aggressive=False)
 
         # Show the pre and post-subtracted radial profiles
         spacing = 10
