@@ -70,7 +70,9 @@ def prepare_run_data(image_path):
     cutouts = h5py.File(image_path)
     images = []
 
-    for key in cutouts.keys():
+    keys = sorted(cutouts.keys())
+
+    for key in keys:
         cutout = np.array(cutouts[key]['DATA'])
         mask = np.array(cutouts[key]['MASK']).astype(int) & (BAD | NO_DATA | BRIGHT_OBJECT)
 
