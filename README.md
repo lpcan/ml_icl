@@ -29,15 +29,15 @@ Below I briefly describe the structure of the repository and the files in it. Yo
 ## Using this code
 Two common use cases of the model would be to directly apply the model to new, unseen data, or to finetune the model. The full method that can be used to reproduce the results from Canepa et al. (in prep) is also described below. Model checkpoints and datasets for download can be found (TODO add Zenodo link)
 
-### Applying the model, producing GradCAM maps.
+### Applying the model, (producing GradCAM maps TODO)
 Check out the notebooks in the `demos/` directory. If you notice any bugs or run into problems, please let me know!
 
 ### Finetuning the model
 `finetune.py` can be used to finetune the model again. Check the comments in that file for more detail of how it works. This file by default does a 5-fold cross-validation on the finetuning data. If instead you want to only perform one round of finetuning, you can use the `finetune_one_split()` function, or if you want to finetune on all the data, you can use the `final_finetune()` function. 
 
-This code should be run on a GPU if possible. It'll work on a CPU, but will take a long time.
+The constants at the top of `finetune.py` will allow you to use different data, different measured fractions, or a different model version as you want.
 
-To reproduce the 
+This code should be run on a GPU if possible. It'll work on a CPU, but will take a long time.
 
 ### Reproducing the full training from the paper
 TODO

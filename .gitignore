@@ -6,7 +6,8 @@ checkpoint*
 *.png
 *.pdf
 *.dat
-data/notebooks/HSC footprint/*
+data/notebooks/*
+measure_sb_cut/notebooks/*
 *__pycache__*
 .*
 jobs
