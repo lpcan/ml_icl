@@ -213,8 +213,8 @@ def test_real_data(model, file_ext, imgs_path, fracs_path, send_to_wandb=False):
     cdfs = outputs.distribution.cdf(x)
 
     # Calculate the model's uncertainty
-    q15s = np.argmax(cdfs >= 0.15, axis=0)
-    q85s = np.argmax(cdfs >= 0.85, axis=0)
+    q15s = np.argmax(cdfs >= 0.15, axis=1)
+    q85s = np.argmax(cdfs >= 0.85, axis=1)
     lower_errors = np.abs(predictions - x[q15s])
     upper_errors = np.abs(x[q85s] - predictions)
 
@@ -254,6 +254,7 @@ def test_real_data(model, file_ext, imgs_path, fracs_path, send_to_wandb=False):
     plt.ylabel('Predicted ICL fraction')
 
     plt.savefig(f'test_graph-{file_ext}.pdf', bbox_inches='tight')
+    plt.savefig(f'test_graph-{file_ext}.png', bbox_inches='tight')
     plt.close()
 
     # Print the result
@@ -281,7 +282,7 @@ if __name__ == '__main__':
         'val_batch_size': 100,
         'optimizer': 'adam',
     },
-    # id='vx6bs1h5', # resume wandb run
+    # id='nt6owzqg', # resume wandb run
     # resume='must'
     )
 
@@ -289,7 +290,7 @@ if __name__ == '__main__':
 
     model = modeller.load_model(model_name=None, lr=1e-4)
 
-    # model = train(model, dataset, validation_dataset, epochs=90, file_ext=file_ext)
+    model = train(model, dataset, validation_dataset, epochs=90, file_ext=file_ext)
 
     plot_binned_plot(model, validation_dataset, file_ext=file_ext, send_to_wandb=True)
-    test_real_data(model, file_ext, imgs_path='badmaskimgs_300kpc.npy', fracs_path='/srv/scratch/mltidal/fracs_manual_photoz.npy', send_to_wandb=True)
+    test_real_data(model, file_ext, imgs_path='data/processed/badmaskimgs_300kpc.npy', fracs_path='/srv/scratch/mltidal/fracs_manual_photoz.npy', send_to_wandb=True)
