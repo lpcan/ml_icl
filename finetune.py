@@ -8,12 +8,14 @@ import pickle
 from model import load_model
 from prep_data import prepare_test_data
 
-MODEL_VERSION = 'checkpoint-trained'
+NAME = 'bkgsubconst'
+MODEL_VERSION = f'checkpoint-sup-{NAME}-final'
 EPOCHS = 100
-FRACS_PATH = 'fracs_manual_photoz.npy'
+FRACS_PATH = '/srv/scratch/mltidal/fracs_manual_photoz.npy'
 PREPPED_IMAGES_PATH = 'data/processed/badmaskimgs_300kpc.npy' # Set to None to prepare data from HDF file
 HDF_PATH = None
-SAVE_AS = 'checkpoints/test_checkpoint' # Checkpoint filename
+PKL_SAVE_AS = f'/srv/scratch/mltidal/finetuning_results/{NAME}-finetuned' # Checkpoint filename
+CHECKPOINT_SAVE_AS = f'/srv/scratch/mltidal/finetuning_results/checkpoints/{NAME}-finetuned'
 
 def flatten(list):
     return np.array([i for row in list for i in row])
@@ -62,8 +64,8 @@ def final_finetune():
 
     finetune_model.fit(images, fracs, epochs=EPOCHS)
 
-    print(f'Saving model as {SAVE_AS}')
-    finetune_model.save_weights(f'{SAVE_AS}.ckpt')
+    print(f'Saving model as {CHECKPOINT_SAVE_AS}')
+    finetune_model.save_weights(f'{CHECKPOINT_SAVE_AS}.ckpt')
 
 def finetune_one_split():
     # Finetune on just one split of the data
@@ -121,7 +123,7 @@ def finetune_one_split():
     plt.close()
 
     # Save the results so the plot can be recreated
-    with open(f'{SAVE_AS}-results.pkl', 'wb') as fp:
+    with open(f'{PKL_SAVE_AS}-results.pkl', 'wb') as fp:
         pickle.dump([predictions, lower_errors, upper_errors], fp)
 
 # Finetuning on separate splits of the data
@@ -189,8 +191,8 @@ if __name__=='__main__':
         err_h.append(upper_errors)
 
         # Save this version of the model as a checkpoint
-        print(f'Saving model as {SAVE_AS}-split{run}')
-        finetune_model.save_weights(f'{SAVE_AS}-split{run}.ckpt')
+        print(f'Saving model as {CHECKPOINT_SAVE_AS}-split{run}')
+        finetune_model.save_weights(f'{CHECKPOINT_SAVE_AS}-split{run}.ckpt')
 
     for i in range(k):
         x = fracs[splits[i]]
@@ -207,7 +209,7 @@ if __name__=='__main__':
     plt.close()
 
     # Save the results so the plot can be recreated
-    with open(f'{SAVE_AS}-results.pkl', 'wb') as fp:
+    with open(f'{PKL_SAVE_AS}-results.pkl', 'wb') as fp:
         pickle.dump([test_results, err_l, err_h], fp)
 
     # Get overall stats
@@ -245,7 +247,7 @@ if __name__=='__main__':
     plt.ylabel('Predicted')
     plt.plot([0,maxval], [0,maxval], 'k--')
 
-    plt.savefig('binned_results.png')
+    plt.savefig(f'binned_results_{NAME}.png')
 
     print(f'MAE = {np.mean(np.abs(flattened_results - actual))}')
     print(pearsonr(actual, flattened_results))
