@@ -109,7 +109,8 @@ def inject_icl(cutout_id, cutouts, z, seg_threshold=25):
 
         # Generate some random parameters for the profile
         amplitude = threshold
-        n = 1 # exponential profile
+        # n = 1 # exponential profile
+        n = np.random.choice([1,2,3,4,5,6,7,8])
         ellip = np.random.uniform(low=0, high=0.5)
         theta = np.random.uniform(low=0, high=2*np.pi)
 
@@ -175,7 +176,7 @@ if __name__ == '__main__':
     # merged = join(members, tbl, keys_left=['RA_cl', 'Dec_cl'], keys_right=['RA [deg]', 'Dec [deg]'])
     # merged = merged['ID', 'Name', 'RA_cl', 'Dec_cl', 'z_cl_1', 'RA', 'Dec']
 
-    generated_data = h5py.File('/srv/scratch/z5214005/generated_data_iclnoise.hdf', 'w')
+    generated_data = h5py.File('/srv/scratch/z5214005/generated_data_gaussianbkg.hdf', 'w')
     # fracs = []
     # finder = SourceFinder(npixels=20, progress_bar=False, nlevels=8)
 
