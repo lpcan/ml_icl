@@ -2,8 +2,8 @@
 Automatically measure the training dataset using multiprocessing
 """
 
-from measure_sb_cut.scripts import measurement_helpers
-from data.scripts.display_cutouts import stretch
+import measurement_helpers
+from measurement_helpers import stretch
 
 from astropy.cosmology import FlatLambdaCDM
 from astropy.convolution import Gaussian2DKernel, convolve
@@ -89,11 +89,23 @@ def calc_icl_frac(cutout, bad_mask, z, return_mask=False):
     bkg_subtracted = bkg_subtracted * ~bad_mask
 
     mid = (cutout.shape[0] // 2, cutout.shape[1] // 2)
-    # Calculate new, smaller masks for central galaxies
+
+    # Mask all galaxies other than the BCG
     threshold = measurement_helpers.sb2counts(26 + 10 * np.log10(1 + z) + k_corr(z))
-    deblended = detect_sources(bkg_subtracted, threshold=threshold, npixels=10)
+    segmented = detect_sources(bkg_subtracted, threshold=threshold, npixels=10)
+    labels = segmented.data
+    eroded = skimage.morphology.binary_erosion((labels > 0), np.ones((3,3)))
+    markers, _ = scipy.ndimage.label(eroded)
+    distance = scipy.ndimage.distance_transform_edt(labels > 0)
+    watershed_labels = skimage.segmentation.watershed(-distance, markers, mask=(labels > 0))
+    # Need to renumber watershed labels to prevent two different objects with same label
+    deblended = np.where(watershed_labels > 0, watershed_labels + np.max(labels), labels)
+
+    # Calculate new, smaller masks for central galaxies
+    # threshold = measurement_helpers.sb2counts(26 + 10 * np.log10(1 + z) + k_corr(z))
+    # deblended = detect_sources(bkg_subtracted, threshold=threshold, npixels=10)
     # Combine to create our new mask
-    combined_labels = deblended.data
+    combined_labels = labels
 
     # Unsharp mask the image for hot mask creation
     kernel = Gaussian2DKernel(2) 
@@ -110,16 +122,16 @@ def calc_icl_frac(cutout, bad_mask, z, return_mask=False):
     bcg_label = combined_labels[mid[0], mid[1]]
 
     # Coordinates of points that are part of the BCG
-    pts = np.array(np.argwhere(combined_labels == bcg_label))
+    # pts = np.array(np.argwhere(combined_labels == bcg_label))
 
-    # Find points that are furthest apart
-    candidates = pts[scipy.spatial.ConvexHull(pts).vertices]
-    dist_mat = scipy.spatial.distance_matrix(candidates, candidates)
-    i, j = np.unravel_index(dist_mat.argmax(), dist_mat.shape)
-    pt1 = candidates[i]
-    pt2 = candidates[j]
+    # # Find points that are furthest apart
+    # candidates = pts[scipy.spatial.ConvexHull(pts).vertices]
+    # dist_mat = scipy.spatial.distance_matrix(candidates, candidates)
+    # i, j = np.unravel_index(dist_mat.argmax(), dist_mat.shape)
+    # pt1 = candidates[i]
+    # pt2 = candidates[j]
 
-    size = np.sqrt((pt1[0] - pt2[0])**2 + (pt1[1] - pt2[1])**2)
+    # size = np.sqrt((pt1[0] - pt2[0])**2 + (pt1[1] - pt2[1])**2)
 
     # Make sure that the radius is >=100kpc
     # radius = np.max((size, cosmo.arcsec_per_kpc_proper(zs[num]).value * 100 * 1/0.168))
@@ -133,7 +145,15 @@ def calc_icl_frac(cutout, bad_mask, z, return_mask=False):
     circ_mask = dist_from_centre <= radius
 
     # Get the member mask
-    member_mask = circ_mask
+    non_member_labels = [label for label in np.unique(deblended)
+                         if label != bcg_label and label != 0]
+    enlarged = measurement_helpers.enlarge_mask(np.isin(deblended, non_member_labels), 
+                                        sigma=0.3)
+    enlarged = enlarged * ~(deblended == bcg_label)
+    
+    non_member_mask = enlarged | hot_mask
+
+    # member_mask = (combined_labels == bcg_label)
 
     # Calculate surface brightness limit
     Y, X = np.ogrid[:224, :224]
@@ -152,7 +172,8 @@ def calc_icl_frac(cutout, bad_mask, z, return_mask=False):
     # Mask above the surface brightness threshold
     # threshold = 25 + 10 * np.log10(1 + z)
     # mask = sb_img >= threshold
-    mask = ~combined_mask & ~hot_mask
+    mask = sb_img >= 26 + 10 * np.log10(1 + z) + measurement_helpers.k_corr(z)
+    # mask = ~combined_mask & ~hot_mask
     
     # Close the mask
     # mask = binary_closing(mask)
@@ -166,7 +187,7 @@ def calc_icl_frac(cutout, bad_mask, z, return_mask=False):
     not_nans = ~nans
 
     # Display the final image
-    masked_img = counts_img * member_mask * circ_mask * not_nans * ~hot_mask
+    masked_img = counts_img * ~non_member_mask * circ_mask * not_nans# * ~hot_mask
 
     icl = np.nansum(masked_img * mask)
     total = np.nansum(masked_img)
@@ -196,6 +217,8 @@ def run_requested_keys(args):
         z = zs[key]
 
         icl, total, frac = calc_icl_frac(cutout, bad_mask, z)
+        if icl is None:
+            print(key)
 
         fracs[0,key] = icl
         fracs[1,key] = total
@@ -256,4 +279,4 @@ if __name__ == '__main__':
 
     fracs = calc_icl_frac_parallel(new_ids, zs)
 
-    np.save('test.npy', fracs)
+    np.save('/srv/scratch/mltidal/fracs_gendata_maskbcgonly.npy', fracs)

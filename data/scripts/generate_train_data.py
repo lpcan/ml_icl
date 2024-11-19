@@ -110,7 +110,6 @@ def inject_icl(cutout_id, cutouts, z, seg_threshold=25):
         # Generate some random parameters for the profile
         amplitude = threshold
         n = 1 # exponential profile
-        # n = np.random.choice([1,2,3,4,5,6,7,8])
         ellip = np.random.uniform(low=0, high=0.5)
         theta = np.random.uniform(low=0, high=2*np.pi)
 
@@ -140,15 +139,14 @@ def inject_icl(cutout_id, cutouts, z, seg_threshold=25):
     sb_limit = 29 + 10 * np.log10(1+z) # Calculate the sb limit
     limit = 10**(-0.4*(sb_limit - 2.5*np.log10(63095734448.0194) - 5.*np.log10(0.168))) # Convert to counts
     icl_img_norm = icl_img / threshold
-    # noise = noise * icl_img_norm
+    noise = noise * icl_img_norm
     noisy_icl = icl_img + noise
 
     # Add the ICL image to the non bright parts
-    # bkg = cutout * ~final_bright_parts
-    # icl_img_norm = icl_img / threshold # this version goes between 0 and 1
-    # bkg = bkg * (1 - icl_img_norm) # fade out when the ICL is there. Might need this to be a mask instead
-    # icl_img = bkg + noisy_icl
-    icl_img = noisy_icl
+    bkg = cutout * ~final_bright_parts
+    icl_img_norm = icl_img / threshold # this version goes between 0 and 1
+    bkg = bkg * (1 - icl_img_norm) # fade out when the ICL is there. Might need this to be a mask instead
+    icl_img = bkg + noisy_icl
     # Add to the bright parts
     img = (cutout * final_bright_parts) + icl_img
 
@@ -177,7 +175,7 @@ if __name__ == '__main__':
     # merged = join(members, tbl, keys_left=['RA_cl', 'Dec_cl'], keys_right=['RA [deg]', 'Dec [deg]'])
     # merged = merged['ID', 'Name', 'RA_cl', 'Dec_cl', 'z_cl_1', 'RA', 'Dec']
 
-    generated_data = h5py.File('/srv/scratch/z5214005/generated_data_gaussianbkg.hdf', 'w')
+    generated_data = h5py.File('/srv/scratch/z5214005/generated_data_iclnoise.hdf', 'w')
     # fracs = []
     # finder = SourceFinder(npixels=20, progress_bar=False, nlevels=8)
 
