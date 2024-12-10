@@ -26,7 +26,7 @@ def prepare_training_data():
     """
     Load and split the tensorflow training dataset into train and test set
     """
-    dataset, validation_dataset = (tfds.load('supervised_data', split=['train[:90%]', 'train[90%:]'], data_dir='/srv/scratch/mltidal/tensorflow_datasets', as_supervised=True)
+    dataset, validation_dataset = (tfds.load('supervised_data', split=['train[:90%]', 'train[90%:]'], as_supervised=True)
     )
 
     dataset = dataset.batch(50)

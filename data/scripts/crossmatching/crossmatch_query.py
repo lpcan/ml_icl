@@ -9,7 +9,9 @@ from astropy.table import Table, vstack
 from hscSspCrossMatch import main
 from hscReleaseQuery import sql_query
 
-f = fits.open('/srv/scratch/z5214005/lrg_s18a_wide_sm.fits')
+LRG_CATALOGUE_PATH = 'TODO:LRG_CATALOGUE_PATH (FROM https://drive.google.com/drive/folders/19dKiNs7Wdq44X3AtYy2opOf8ulHTLWeM)'
+
+f = fits.open(LRG_CATALOGUE_PATH)
 tbl = f[1].data[f[1].data['z'] <= 0.5]
 tbl = Table(tbl)
 

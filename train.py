@@ -15,7 +15,7 @@ import model as modeller
 def train(model, train_data, val_data, epochs=100, file_ext=''):
     # Define some callbacks for training
     cp_callback = keras.callbacks.ModelCheckpoint(
-        filepath=f'checkpoint-sup-{file_ext}.ckpt',
+        filepath=f'checkpoint-{file_ext}.ckpt',
         save_best_only=True,
         save_weights_only=True
     )
@@ -32,7 +32,7 @@ def train(model, train_data, val_data, epochs=100, file_ext=''):
                               ],
                               verbose=2)
     print(f'Saving model as {file_ext}')
-    model.save_weights(f'checkpoint-sup-{file_ext}-final.ckpt')
+    model.save_weights(f'checkpoint-{file_ext}-final.ckpt')
 
     return model
 
@@ -232,7 +232,7 @@ def test_real_data(model, file_ext, imgs_path, fracs_path, err=None):
     plt.xlabel('Actual ICL fraction')
     plt.ylabel('Predicted ICL fraction')
 
-    plt.savefig(f'test_graph-{file_ext}.pdf', bbox_inches='tight')
+    # plt.savefig(f'test_graph-{file_ext}.pdf', bbox_inches='tight')
     plt.savefig(f'test_graph-{file_ext}.png', bbox_inches='tight')
     plt.close()
 
@@ -255,4 +255,4 @@ if __name__ == '__main__':
     model = train(model, dataset, validation_dataset, epochs=90, file_ext=file_ext)
 
     plot_binned_plot(model, validation_dataset, file_ext=file_ext)
-    test_real_data(model, file_ext, imgs_path='data/processed/badmaskimgs_300kpc.npy', fracs_path='/srv/scratch/mltidal/fracs_manual_photoz.npy')
+    test_real_data(model, file_ext, imgs_path='data/processed/finetuning_data/finetuning_images.npy', fracs_path='data/processed/finetuning_data/finetuning_fractions.npy')

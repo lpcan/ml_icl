@@ -24,6 +24,8 @@ from unagi import hsc
 
 import measurement_helpers
 
+CUTOUTS_PATH = 'TODO:CUTOUTS_PATH'
+
 BAD = 1
 NO_DATA = (1 << 8)
 BRIGHT_OBJECT = (1 << 9)
@@ -356,8 +358,8 @@ def run_one():
 
 if __name__ == '__main__':
     # Read table and cutouts file
-    tbl = ascii.read('/srv/scratch/z5214005/camira_final.tbl')
-    cutouts = h5py.File('/srv/scratch/z5214005/cutouts_300/cutouts_300.hdf')
+    tbl = ascii.read('data/processed/camira_final.tbl')
+    cutouts = h5py.File(CUTOUTS_PATH)
     # First pass run through all images with default parameters
     for idx in range(125):
         print(f'======================={idx}=======================')
@@ -387,7 +389,7 @@ if __name__ == '__main__':
         plt.fill_between(high_dists, (means+stds)[distances_kpc > 80], (means-stds)[distances_kpc > 80], alpha=0.2, color='b')
 
         plt.plot(high_dists, means_bkg[distances_kpc > 80], c='r', label='2')
-        plt.fill_between(high_dists, (means_bkg+stds_bkg)[distances_kpc > 80], (means_bkg-stds_bkg)[distances_kpc > 80], alpha=0.2, color='r')
+        plt.fill_between(high_dists, (means_bkg+std_bkg)[distances_kpc > 80], (means_bkg-std_bkg)[distances_kpc > 80], alpha=0.2, color='r')
         plt.ylabel('Average flux (counts)')
         plt.xlabel('Distance (kpc)')
 

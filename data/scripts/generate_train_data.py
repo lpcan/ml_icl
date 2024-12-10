@@ -12,6 +12,10 @@ import skimage
 from photutils.segmentation import detect_sources
 from astropy.stats import sigma_clipped_stats, mad_std
 
+OUTPUT_FILE = 'TODO:OUTPUT_FILENAME'
+LRG_TBL = 'TODO:LRG_TABLE_PATH'
+LRG_CUTOUTS = 'TODO:LRG_CUTOUTS_PATH'
+
 # Convenience function for plotting the images
 stddev = 0.017359
 def stretch(img):
@@ -99,7 +103,7 @@ def inject_icl(cutout_id, cutouts, z, seg_threshold=25):
 
     distances = scipy.spatial.distance.cdist([centre], np.argwhere(opened_blob)[edges.vertices])[0] # Distances to edges of shape
     
-    quantile = 1
+    quantile = np.random.choice([0,0.25,0.5,1])
     size_frac = 10
     
     # Try with these parameters, but for very irregularly shaped galaxies, r_eff
@@ -121,13 +125,8 @@ def inject_icl(cutout_id, cutouts, z, seg_threshold=25):
         # icl_img = np.where(central_blob, 0, icl_img)
         icl_img = np.where(final_bright_parts, 0, icl_img)
 
-        # Calculate the new artificial ICL fraction
         sb_limit = 30.2 + 10 * np.log10(1+z) # Calculate the sb limit
         limit = 10**(-0.4*(sb_limit - 2.5*np.log10(63095734448.0194) - 5.*np.log10(0.168))) # Convert to counts
-        icl = np.sum(icl_img[icl_img > limit])
-
-        _, med, _ = sigma_clipped_stats(cutout)
-        total = np.sum(((np.array(cutout) - med) * central_blob) + icl_img)
         
         size_frac = (np.sum(icl_img > limit) / np.sum(central_blob))
         quantile -= 0.25
@@ -154,8 +153,6 @@ def inject_icl(cutout_id, cutouts, z, seg_threshold=25):
 
     result = {}
     result['img'] = img
-    result['icl'] = icl
-    result['total'] = total
     result['amplitude'] = amplitude
     result['ellip'] = ellip
     result['theta'] = theta
@@ -164,20 +161,10 @@ def inject_icl(cutout_id, cutouts, z, seg_threshold=25):
     return result
 
 if __name__ == '__main__':
-    cutouts = h5py.File('/srv/scratch/z5214005/lrg_cutouts_300kpc_resized.hdf')
-    tbl = ascii.read('/srv/scratch/z5214005/lrgs_sampled_1405.tbl')
+    cutouts = h5py.File(LRG_CUTOUTS)
+    tbl = ascii.read(LRG_TBL)
 
-    # # Load the cluster member catalogue
-    # members = ascii.read('data/raw/camira_s20a_wide_member.dat', 
-    #                     names=['RA_cl', 'Dec_cl', 'Richness', 'z_cl', 'RA', 'Dec', 'M', 'w'])
-
-    # # Match this catalogue to the cluster catalogue
-    # merged = join(members, tbl, keys_left=['RA_cl', 'Dec_cl'], keys_right=['RA [deg]', 'Dec [deg]'])
-    # merged = merged['ID', 'Name', 'RA_cl', 'Dec_cl', 'z_cl_1', 'RA', 'Dec']
-
-    generated_data = h5py.File('/srv/scratch/z5214005/generated_data_iclnoise.hdf', 'w')
-    # fracs = []
-    # finder = SourceFinder(npixels=20, progress_bar=False, nlevels=8)
+    generated_data = h5py.File(OUTPUT_FILE, 'w')
 
     for num in range(len(tbl)):
         print(f'{num}', end='\r')
@@ -191,9 +178,6 @@ if __name__ == '__main__':
 
         # Add to file
         generated_data[f'{cutout_id}/HDU0/DATA'] = result['img']
-        generated_data[f'{cutout_id}/FRAC'] = result['icl'] / result['total']
-        generated_data[f'{cutout_id}/ICL'] = result['icl']
-        generated_data[f'{cutout_id}/TOTAL'] = result['total']
         generated_data[f'{cutout_id}/PARAMS/AMP'] = result['amplitude']
         generated_data[f'{cutout_id}/PARAMS/ELLIP'] = result['ellip']
         generated_data[f'{cutout_id}/PARAMS/THETA'] = result['theta']

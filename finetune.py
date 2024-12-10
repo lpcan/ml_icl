@@ -8,14 +8,14 @@ import pickle
 from model import load_model
 from prep_data import prepare_test_data
 
-NAME = 'bkgsubconst'
-MODEL_VERSION = f'checkpoint-sup-{NAME}-final'
+NAME = 'final'
+MODEL_VERSION = f'checkpoint-finetuned'
 EPOCHS = 100
-FRACS_PATH = '/srv/scratch/mltidal/fracs_manual_photoz.npy'
-PREPPED_IMAGES_PATH = 'data/processed/badmaskimgs_300kpc.npy' # Set to None to prepare data from HDF file
+FRACS_PATH = 'data/processed/finetuning_data/finetuning_images.npy'
+PREPPED_IMAGES_PATH = 'data/processed/finetuning_data/finetuning_images.npy' # Set to None to prepare data from HDF file
 HDF_PATH = None
-PKL_SAVE_AS = f'/srv/scratch/mltidal/finetuning_results/{NAME}-finetuned' # Checkpoint filename
-CHECKPOINT_SAVE_AS = f'/srv/scratch/mltidal/finetuning_results/checkpoints/{NAME}-finetuned'
+PKL_SAVE_AS = f'{NAME}-finetuned' # Checkpoint filename
+CHECKPOINT_SAVE_AS = f'checkpoints/{NAME}-finetuned'
 
 def flatten(list):
     return np.array([i for row in list for i in row])

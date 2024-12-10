@@ -12,19 +12,16 @@ from unagi import hsc
 from unagi.task import hsc_cutout
 
 # Parameters
-script_dir = os.path.dirname(__file__)
+SCRIPT_DIR = os.path.dirname(__file__)
 
-cat_path = '/srv/scratch/z5214005/camira_final.tbl' 
-exclude = None # do not redownload clusters that are already in `exclude`
-half_size = 1 * u.arcmin 
-output_dir = '/srv/scratch/mltidal/'
-rerun = "pdr2_dud"
-
-# HSC username: locan@local
-# HSC password: 
+CAT_PATH = SCRIPT_DIR + '/../processed/camira_final.tbl'
+EXCLUDE = None # do not redownload clusters that are already in `exclude`
+HALF_SIZE = 1 * u.arcmin 
+OUTPUT_DIR = 'TODO:OUTPUT_DIR'
+RERUN = 'pdr2_dud'
 
 # Create a list of coordinates of the cluster locations
-tbl = ascii.read(cat_path, names = ['ID', 
+tbl = ascii.read(CAT_PATH, names = ['ID', 
                                     'Name', 
                                     'RA [deg]', 
                                     'Dec [deg]', 
@@ -42,8 +39,8 @@ coords = SkyCoord(ras, decs, unit=u.deg)
 print(f"{len(coords)} clusters to download")
 
 # Check for overlap with exclude catalogue and remove
-if exclude is not None:
-    tbl = ascii.read(exclude, names = ['ID', 
+if EXCLUDE is not None:
+    tbl = ascii.read(EXCLUDE, names = ['ID', 
                                        'Name', 
                                        'RA [deg]', 
                                        'Dec [deg]', 
@@ -67,10 +64,10 @@ if exclude is not None:
     print(f"{len(idx)} matches made, now {len(coords)} clusters to download") 
 
 # Download the cutouts and put them in the output directory
-pdr2 = hsc.Hsc(dr='pdr2', rerun=rerun)
+pdr2 = hsc.Hsc(dr='pdr2', rerun=RERUN)
 
-f = open(output_dir+"failed_downloads.txt", "a+")
-f.write(f"Clusters from {cat_path}\n")
+f = open(OUTPUT_DIR+"failed_downloads.txt", "a+")
+f.write(f"Clusters from {CAT_PATH}\n")
 
 cosmo = FlatLambdaCDM(H0=68.4, Om0=0.301)
 
@@ -78,8 +75,8 @@ for i,c in enumerate(coords):
     print(f"Downloading cluster {i}")
 
     try:
-        hsc_cutout(c, cutout_size=half_size, filters='r', archive=pdr2, 
-                   use_saved=False, output_dir=output_dir, verbose=False, 
+        hsc_cutout(c, cutout_size=HALF_SIZE, filters='r', archive=pdr2, 
+                   use_saved=False, output_dir=HALF_SIZE, verbose=False, 
                    save_output=True, variance=False, mask=True)
     except Exception as e:
         print(f"{e} for cluster {i}")
