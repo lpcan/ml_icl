@@ -8,8 +8,6 @@ import numpy as np
 from scipy.stats import pearsonr
 import sys
 from tensorflow import keras
-import wandb
-from wandb.keras import WandbMetricsLogger
  
 import prep_data as datasets
 import model as modeller
@@ -31,15 +29,10 @@ def train(model, train_data, val_data, epochs=100, file_ext=''):
                                   cp_callback, 
                                   lr_callback, 
                                   stop_callback, 
-                                  WandbMetricsLogger(),
                               ],
                               verbose=2)
     print(f'Saving model as {file_ext}')
     model.save_weights(f'checkpoint-sup-{file_ext}-final.ckpt')
-
-    # Save all the checkpoint files to wandb
-    wandb.save(f'checkpoint-sup-{file_ext}.ckpt*')
-    wandb.save(f'checkpoint-sup-{file_ext}-final.ckpt*')
 
     return model
 
@@ -135,7 +128,7 @@ def binned_plot(dataset, Y, ds_numpy=None, filename='binned_plot.png', n=10, per
 
     return bin_centers, bin_data
 
-def plot_binned_plot(model, val_data, file_ext, send_to_wandb=False):
+def plot_binned_plot(model, val_data, file_ext):
     """
     Get the model's predictions on the validation data by taking the mode of the
     output probability distributions. Use these for creating the binned plot
@@ -154,19 +147,6 @@ def plot_binned_plot(model, val_data, file_ext, send_to_wandb=False):
 
     # Create binned plot
     bin_centers, bin_data = binned_plot(val_data, predictions, n=20, percentiles=[35,45,50], color='b', filename=f'binned_plot-{file_ext}.png')
-
-    # Optionally send to wandb
-    if send_to_wandb:
-        # Just plot the central line
-        data = [[x, y] for (x, y) in zip(bin_centers, bin_data['50'])]
-        table = wandb.Table(data=data, columns=['Actual fraction', 'Predicted fraction'])
-        wandb.log(
-            {
-                'binned_plot_id': wandb.plot.line(
-                    table, 'Actual fraction', 'Predicted fraction', title='Binned validation plot'
-                )
-            }
-        )
 
 def plot_loss(jobnumbers):
     """
@@ -193,7 +173,7 @@ def plot_loss(jobnumbers):
     plt.savefig('Loss graph')
     plt.close()
 
-def test_real_data(model, file_ext, imgs_path, fracs_path, send_to_wandb=False):
+def test_real_data(model, file_ext, imgs_path, fracs_path, err=None):
     """
     Plot the model's performance on real data (no finetuning)
     """
@@ -219,9 +199,8 @@ def test_real_data(model, file_ext, imgs_path, fracs_path, send_to_wandb=False):
     upper_errors = np.abs(x[q85s] - predictions)
 
     # Load the measurement errors
-    xerror = np.load('err_photoz.npy')
+    xerror = np.load(err)
     xerror = xerror[~np.isnan(xerror)]
-    xerror = expected * xerror
     sorted_idxs = np.argsort(expected)
 
     # Bin the values and calculate median of binned results
@@ -261,11 +240,6 @@ def test_real_data(model, file_ext, imgs_path, fracs_path, send_to_wandb=False):
     print(f'MAE = {np.mean(np.abs(expected - predictions))}')
     print(pearsonr(expected, predictions))
 
-    if send_to_wandb:
-        data = [[x, y] for (x, y) in zip(expected, predictions)]
-        table = wandb.Table(data=data, columns=['Actual', 'Predictions'])
-        wandb.log({'test_graph': wandb.plot.scatter(table, 'Actual', 'Predictions')})
-
     return (expected, predictions)
 
 if __name__ == '__main__':
@@ -274,23 +248,11 @@ if __name__ == '__main__':
     else:
         file_ext = ''
 
-    wandb.init(
-    project='ml-icl',
-    config={
-        'epochs': 100, 
-        'train_batch_size': 50,
-        'val_batch_size': 100,
-        'optimizer': 'adam',
-    },
-    # id='nt6owzqg', # resume wandb run
-    # resume='must'
-    )
-
     dataset, validation_dataset = datasets.prepare_training_data()
 
     model = modeller.load_model(model_name=None, lr=1e-4)
 
     model = train(model, dataset, validation_dataset, epochs=90, file_ext=file_ext)
 
-    plot_binned_plot(model, validation_dataset, file_ext=file_ext, send_to_wandb=True)
-    test_real_data(model, file_ext, imgs_path='data/processed/badmaskimgs_300kpc.npy', fracs_path='/srv/scratch/mltidal/fracs_manual_photoz.npy', send_to_wandb=True)
+    plot_binned_plot(model, validation_dataset, file_ext=file_ext)
+    test_real_data(model, file_ext, imgs_path='data/processed/badmaskimgs_300kpc.npy', fracs_path='/srv/scratch/mltidal/fracs_manual_photoz.npy')
