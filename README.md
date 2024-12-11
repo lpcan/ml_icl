@@ -29,21 +29,27 @@ Below I briefly describe the structure of the repository and the files in it. Yo
 ## Using this code
 Two common use cases of the model would be to directly apply the model to new, unseen data, or to finetune the model. The full method that can be used to reproduce the results from Canepa et al. (in prep) is also described below. Model checkpoints and datasets for download can be found (TODO add Zenodo link)
 
-### Applying the model, (producing GradCAM maps TODO)
+### Applying the model, producing GradCAM maps
 Check out the notebooks in the `demos/` directory. If you notice any bugs or run into problems, please let me know!
 
 ### Finetuning the model
-`finetune.py` can be used to finetune the model again. Check the comments in that file for more detail of how it works. This file by default does a 5-fold cross-validation on the finetuning data. If instead you want to only perform one round of finetuning, you can use the `finetune_one_split()` function, or if you want to finetune on all the data, you can use the `final_finetune()` function. 
+`finetune.py` can be used to finetune the model again. You will need to download the `checkpoint-trained.zip` checkpoint files and `finetuning_data.zip` files from [here](https://zenodo.org/records/13677353) and extract these files. Check the comments in `finetune.py` for more detail of how it works. This file by default does a 5-fold cross-validation on the finetuning data. If instead you want to only perform one round of finetuning, you can use the `finetune_one_split()` function, or if you want to finetune on all the data, you can use the `final_finetune()` function. 
 
 The constants at the top of `finetune.py` will allow you to use different data, different measured fractions, or a different model version as you want.
 
 This code should be run on a GPU if possible. It'll work on a CPU, but will take a long time.
 
 ### Reproducing the full training from the paper
-TODO
+You will need to download the `artificial_dataset.zip` and the `finetuning_data.zip` from [here](https://zenodo.org/records/13677353) and extract the dataset into your default `tensorflow_datasets` folder. You should then be able to directly use `train.py` to train a new model. This will save model checkpoints as it goes, and a final checkpoint at the end of the training. It will also produce a binned plot of the final validation result with `plot_binned_plot`, and will also run the trained model on the finetuning data with `test_real_data`. Check variables in that file if you would like to customise different things about the training run.
+
+This code should be run on a GPU.
 
 ### Other edits
-TODO
+Changing the model architecture: this can be done by editing the model definition in the `model.py` file. You will then need to retrain the model fully as provided checkpoints will not work with different model architectures.
 
-## Abstract
-TODO
+Changing the data augmentations: this can be done by editing the augmenter definitions in `augmentations.py`. As long as the augmentations you want to add are defined as Keras layers, they will work fine.
+
+If there are other modifications you want to make that are unclear how to do, feel free to contact me with any questions.
+
+## Abstract (from Canepa et al. (in prep))
+The intracluster light (ICL) is an important tracer of a galaxy cluster's history and past interactions. However, only small samples have been studied to date due to its very low surface brightness and the heavy manual involvement required for the majority of measurement algorithms. Upcoming large imaging surveys such as the Vera C. Rubin Observatory's Legacy Survey of Space and Time are expected to vastly expand available samples of deep cluster images. However, to process this increased amount of data, we need faster, fully automated methods to streamline the measurement process. This paper presents a machine learning model designed to automatically measure the ICL fraction in large samples of images, with no manual preprocessing required. We train the fully supervised model on a training dataset of 50,000 images with injected artificial ICL profiles. We then transfer its learning onto real data by fine-tuning with a sample of 101 real clusters with their ICL fraction measured manually using the surface brightness threshold method. With this process, the model is able to effectively learn the task and then adapt its learning to real cluster images. Our model can be directly applied to Hyper Suprime-Cam images, processing up to 500 images in a matter of seconds on a single GPU, or fine-tuned for other imaging surveys such as LSST, with the fine-tuning process taking just 3 minutes. The model could also be retrained to match other ICL measurement methods. Our model and the code for training it is made available on GitHub.

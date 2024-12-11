@@ -9,7 +9,7 @@ from model import load_model
 from prep_data import prepare_test_data
 
 NAME = 'final'
-MODEL_VERSION = f'checkpoint-finetuned'
+MODEL_VERSION = f'checkpoint-trained'
 EPOCHS = 100
 FRACS_PATH = 'data/processed/finetuning_data/finetuning_images.npy'
 PREPPED_IMAGES_PATH = 'data/processed/finetuning_data/finetuning_images.npy' # Set to None to prepare data from HDF file
@@ -67,7 +67,7 @@ def final_finetune():
     print(f'Saving model as {CHECKPOINT_SAVE_AS}')
     finetune_model.save_weights(f'{CHECKPOINT_SAVE_AS}.ckpt')
 
-def finetune_one_split():
+def finetune_one_split(idx=0):
     # Finetune on just one split of the data
     fracs, images = prepare_data()
 
@@ -76,8 +76,10 @@ def finetune_one_split():
     idxs = np.arange(len(fracs))
     rng.shuffle(idxs)
     splits = np.array_split(idxs, 5)
-    test_set = splits[0]
-    train_set = np.concatenate(splits[1:])
+    test_set = splits[idx]
+    train_set = splits.copy()
+    train_set.pop(idx)
+    train_set = np.concatenate(train_set)
     test_ds = images[test_set]
     test_labels = fracs[test_set]
     train_ds = images[train_set]
