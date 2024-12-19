@@ -34,7 +34,7 @@ cmap.set_bad(cmap(0))
 cosmo = FlatLambdaCDM(H0=68.4, Om0=0.301)
 pdr2 = hsc.Hsc(dr='pdr2', rerun='pdr2_dud',config_file=None)
 
-def get_xy(ras, decs, original_shape, header):
+def get_xy(ras, decs, original_shape, header, size=224):
     """
     Get the pixel locations of the cluster members
     """
@@ -46,18 +46,18 @@ def get_xy(ras, decs, original_shape, header):
 
     coords = SkyCoord(member_ras, member_decs, unit='deg')
     coords = wcs.utils.skycoord_to_pixel(coords, w)
-    x_coords = coords[0] / (original_shape[1] / 224)
-    y_coords = coords[1] / (original_shape[0] / 224)
+    x_coords = coords[0] / (original_shape[1] / size)
+    y_coords = coords[1] / (original_shape[0] / size)
 
     return x_coords, y_coords
 
-def get_members(cluster, original_shape, header):
+def get_members(cluster, original_shape, header, size=224, halfsize_kpc=300):
     """
     Return cluster member pixel locations
     """
 
     # cluster = tbl[idx]
-    half_size = (cosmo.arcsec_per_kpc_proper(cluster['z_cl']) * 300).value
+    half_size = (cosmo.arcsec_per_kpc_proper(cluster['z_cl']) * halfsize_kpc).value
 
     query = f"""SELECT
                 object_id
@@ -82,7 +82,7 @@ def get_members(cluster, original_shape, header):
 
     z = cluster['z_cl']
     photoz_members = result[(result['photoz_best'] < (z + 3*0.05*(1+z))) & (result['photoz_best'] > (z - 3*0.05*(1+z)))]
-    coords = get_xy(photoz_members['ra'], photoz_members['dec'], original_shape, header)
+    coords = get_xy(photoz_members['ra'], photoz_members['dec'], original_shape, header, size=size)
     
     return coords
 
@@ -95,12 +95,14 @@ def background_rms(cutout, bad_mask):
     return rms
     
 def radial_profile(cutout, mask):
+    shape = cutout.shape
     spacing = 10
     # Subtract off any remaining constant background
-    Y, X = np.ogrid[:224, :224]
-    radii = np.expand_dims(np.arange(-1, 112, spacing), (1, 2))
+    Y, X = np.ogrid[:shape[0], :shape[1]]
+    size = min(shape)
+    radii = np.expand_dims(np.arange(-1, size/2, spacing), (1, 2))
 
-    distances = np.expand_dims(np.sqrt((X - 112)**2 + (Y - 112)**2), 0)
+    distances = np.expand_dims(np.sqrt((X - size/2)**2 + (Y - size/2)**2), 0)
 
     circles = (distances <= radii)
     annuli = np.diff(circles, axis=0)
@@ -124,11 +126,11 @@ def radial_profile(cutout, mask):
 
     return means, stds
 
-def create_non_member_mask(cutout, cluster, mask, original_shape, member_coords, aggressive=True, sigma=0.3):
+def create_non_member_mask(cutout, cluster, mask, original_shape, member_coords, aggressive=True, npixels_cold=10, sigma_cold=0.3, kernel_size=2, npixels_hot=3, sigma_hot=0):
     # Segment and deblend the cutout
     threshold = measurement_helpers.sb2counts(26 + 10 * np.log10(1 + cluster['z_cl']) + measurement_helpers.k_corr(cluster['z_cl']))
-    segmented = detect_sources(cutout, threshold=threshold, npixels=10)
-    deblended = deblend_sources(cutout, segmented, npixels=10, progress_bar=False).data
+    segmented = detect_sources(cutout, threshold=threshold, npixels=npixels_cold)
+    deblended = deblend_sources(cutout, segmented, npixels=npixels_cold, progress_bar=False).data
 
     if not aggressive:
         labels = segmented.data
@@ -147,25 +149,32 @@ def create_non_member_mask(cutout, cluster, mask, original_shape, member_coords,
     non_member_labels = [label for label in np.unique(deblended)
                          if label not in member_labels and label != 0]
     enlarged = measurement_helpers.enlarge_mask(np.isin(deblended, non_member_labels), 
-                                        sigma=sigma)
+                                        sigma=sigma_cold)
     enlarged = enlarged * ~np.isin(deblended, member_labels)
     
     # Add in the hot mask
-    kernel = Gaussian2DKernel(2)
+    kernel = Gaussian2DKernel(kernel_size)
     conv_img = convolve(np.array(cutout), kernel)
     unsharp = cutout - conv_img
     hot_mask_bkg = Background2D(unsharp, box_size=16).background
     combined_mask = (deblended > 0)
     hot_labels = measurement_helpers.create_hot_labels(unsharp, combined_mask,
-                                               background=hot_mask_bkg, npixels=3)
+                                               background=hot_mask_bkg, npixels=npixels_hot)
     hot_mask = (hot_labels > 0)
+    if sigma_hot > 0:
+        hot_enlarged = measurement_helpers.enlarge_mask(hot_mask, sigma=sigma_hot)
+        hot_enlarged = hot_enlarged * ~np.isin(deblended, member_labels)
+    else:
+        hot_enlarged = hot_mask
 
-    return enlarged | hot_mask
+    return enlarged | hot_enlarged
 
 def background_estimate_2d(cutout, bad_mask, constant=True, multiplier=1, mask_initial=False):
+    shape = cutout.shape
+    size = min(shape)
     spacing = 10
     # Fit and subtract off any gradients in the image
-    box_size = 224 // 14
+    box_size = size // 14
     if not mask_initial:
         bkg_initial = Background2D(cutout, box_size=box_size)
     else:
@@ -185,10 +194,10 @@ def background_estimate_2d(cutout, bad_mask, constant=True, multiplier=1, mask_i
     bkg = zoom(znew, np.array(cutout.shape) / np.array([14, 14]), mode='reflect')
 
     # Subtract off any remaining constant background
-    Y, X = np.ogrid[:224, :224]
-    radii = np.expand_dims(np.arange(-1, 112, spacing), (1, 2))
+    Y, X = np.ogrid[:shape[0], :shape[1]]
+    radii = np.expand_dims(np.arange(-1, size//2, spacing), (1, 2))
 
-    distances = np.expand_dims(np.sqrt((X - 112)**2 + (Y - 112)**2), 0)
+    distances = np.expand_dims(np.sqrt((X - size//2)**2 + (Y - size//2)**2), 0)
 
     circles = (distances <= radii)
     annuli = np.diff(circles, axis=0)
@@ -208,6 +217,8 @@ def background_estimate_2d(cutout, bad_mask, constant=True, multiplier=1, mask_i
     mean_of_means = multiplier * np.min(means) / 3
 
     if constant:
+        bkg = mean_of_means
+    else:
         bkg = bkg + mean_of_means
 
     return bkg
